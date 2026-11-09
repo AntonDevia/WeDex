@@ -2218,6 +2218,7 @@ impl GlassUi {
             root.opacity = page_progress.max(0.0001);
         }
         if self.rendered_overlay != self.overlay {
+            self.offsets.remove("dialog-scroll");
             if self.overlay.is_some() {
                 self.overlay_started = now;
                 self.closing_overlay = None;

@@ -6061,7 +6061,7 @@ dependencies = [
 
 [[package]]
 name = "wedex"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "android_logger",
  "anyhow",

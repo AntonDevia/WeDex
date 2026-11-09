@@ -1,6 +1,30 @@
 use super::*;
 use egui::{Event, Modifiers, PointerButton, RawInput};
 
+#[test]
+fn updates_open_at_the_top_after_scrolling_settings() {
+    let _mobile = crate::platform::mobile_for_test();
+    let m = fixture();
+    let mut h = Harness::new();
+    h.size = vec2(411., 838.);
+    h.ui.overlay = Some(Overlay::Settings);
+    h.frame(&m, vec![]);
+    h.ui.offsets.insert("dialog-scroll".into(), 300.);
+    h.frame(&m, vec![]);
+    let p = h.point(|c| matches!(c, Control::Overlay(Overlay::Updates)), 0.5);
+    h.click(&m, p);
+    h.frame(&m, vec![]);
+    assert_eq!(h.ui.overlay, Some(Overlay::Updates));
+    assert_eq!(h.ui.offsets.get("dialog-scroll").copied().unwrap_or(0.), 0.);
+    let body =
+        h.ui.last_overlay
+            .as_ref()
+            .unwrap()
+            .find("Panel body")
+            .unwrap();
+    assert_eq!(body.y, 0.);
+}
+
 #[cfg(windows)]
 #[test]
 fn vps_form_keeps_focus_and_clears_secrets_on_submit_or_close() {

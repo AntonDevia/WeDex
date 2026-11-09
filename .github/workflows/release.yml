@@ -9,6 +9,9 @@ on:
         required: true
 permissions:
   contents: write
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: true
 env:
   RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
   WEDEX_UPDATE_REPOSITORY: ${{ github.repository }}
