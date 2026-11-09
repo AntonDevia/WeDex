@@ -1219,6 +1219,18 @@ impl App {
         if page == "error" {
             self.report_error("preview-service", "HTTP 503: fixture service unavailable");
         }
+        if page == "updates" {
+            self.updates.view.message = "Доступно обновление".into();
+            self.updates.view.app = Some(wedex_update::Release {
+                version: "0.8.1".into(),
+                notes: "Улучшения Sonora и воспроизведения.\nОбновление сохраняет вашу музыку и настройки.".into(),
+                page: "https://github.com/AntonDevia/WeDex/releases".into(),
+                url: String::new(),
+                sha256: String::new(),
+                size: 1,
+                target: wedex_update::Target::Windows,
+            });
+        }
     }
     fn glass_model(&self) -> Model {
         let public = |text: &str| {

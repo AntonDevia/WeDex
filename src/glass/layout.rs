@@ -584,7 +584,7 @@ impl Layout {
         }
         if self.mobile && !landscape {
             if let Some(title) = root.find_mut("sonora") {
-                title.move_to(self.main_x, 42.);
+                title.move_to(self.main_x, 20.);
                 title.font_size = 36.;
                 title.natural_width = 0.;
                 title.width = (content_w - 156.).max(100.);
@@ -1160,7 +1160,7 @@ mod mobile_tests {
             ));
             layout.sonora(&mut root);
             let title = root.find("sonora").unwrap();
-            assert!(title.y >= 36. && title.y <= 48.);
+            assert_eq!(title.y, 20.);
             assert!(!root.find("Cover flow · swipe").unwrap().clips_content);
         }
     }

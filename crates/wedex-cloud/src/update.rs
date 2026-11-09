@@ -72,6 +72,13 @@ pub fn apply(data: &Path, repo: &str) -> Result<()> {
         let release_path = Path::new("/opt/wedex/releases")
             .join(format!("{}-{}", release.version, release.sha256));
         std::fs::create_dir_all(&release_path)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            // The update worker has UMask=0077; the unprivileged service
+            // must still be able to traverse its immutable release directory.
+            std::fs::set_permissions(&release_path, std::fs::Permissions::from_mode(0o755))?;
+        }
         std::fs::copy(&binary, release_path.join("wedex-server"))?;
         let previous = std::fs::read_link("/opt/wedex/current")?;
         status("installing", "Сохраняем базу и перезапускаем службу")?;

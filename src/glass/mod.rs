@@ -366,6 +366,7 @@ impl GlassUi {
             _ => Page::Sonora,
         };
         self.overlay = match name {
+            "updates" => Some(Overlay::Updates),
             #[cfg(windows)]
             "vps" => Some(Overlay::Vps),
             "queue" => Some(Overlay::Queue),
