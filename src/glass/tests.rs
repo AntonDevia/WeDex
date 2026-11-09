@@ -2,6 +2,18 @@ use super::*;
 use egui::{Event, Modifiers, PointerButton, RawInput};
 
 #[test]
+fn synchronized_connections_preserve_the_open_player_panel() {
+    let mut h = Harness::new();
+    h.ui.overlay = Some(Overlay::Eq);
+    h.ui.connection_updated(Provider::LastFm, "synthetic-synced-key");
+    assert_eq!(h.ui.overlay, Some(Overlay::Eq));
+    assert_eq!(h.ui.lastfm, "synthetic-synced-key");
+    h.ui.connection_updated(Provider::LastFm, "");
+    assert_eq!(h.ui.overlay, Some(Overlay::Eq));
+    assert!(h.ui.lastfm.is_empty());
+}
+
+#[test]
 fn updates_open_at_the_top_after_scrolling_settings() {
     let _mobile = crate::platform::mobile_for_test();
     let m = fixture();

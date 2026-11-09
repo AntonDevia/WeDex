@@ -374,7 +374,11 @@ impl App {
     fn save_connection_impl(&mut self, provider: Provider, value: &str, notify: bool) {
         let value = value.trim();
         if self.preview_status.is_some() {
-            self.interface.connection_saved(provider, value);
+            if notify {
+                self.interface.connection_saved(provider, value);
+            } else {
+                self.interface.connection_updated(provider, value);
+            }
             return;
         }
         let saved = (|| -> anyhow::Result<String> {
@@ -427,7 +431,11 @@ impl App {
                     }
                     Provider::YouTube => {}
                 }
-                self.interface.connection_saved(provider, &value);
+                if notify {
+                    self.interface.connection_saved(provider, &value);
+                } else {
+                    self.interface.connection_updated(provider, &value);
+                }
                 if provider == Provider::Yandex && !value.is_empty() {
                     self.sync();
                 }

@@ -103,13 +103,16 @@ impl GlassUi {
         true
     }
     pub fn connection_saved(&mut self, provider: Provider, value: &str) {
+        self.connection_updated(provider, value);
+        self.overlay = Some(Overlay::Sources);
+    }
+    pub fn connection_updated(&mut self, provider: Provider, value: &str) {
         match provider {
             Provider::Yandex => self.yandex = value.into(),
             Provider::LastFm => self.lastfm = value.into(),
             Provider::SoundCloud => self.soundcloud = value.into(),
             _ => {}
         }
-        self.overlay = Some(Overlay::Sources);
     }
 }
 

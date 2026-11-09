@@ -95,7 +95,16 @@ jobs:
           path: WeDex-Android.apk
   publish:
     needs: [linux, windows, android]
-    if: ${{ always() && needs.linux.result == 'success' && (needs.windows.result == 'success' || needs.android.result == 'success' || startsWith(inputs.tag || github.ref_name, 'server-')) }}
+    if: >-
+      ${{ always() && !cancelled() && needs.linux.result == 'success' &&
+          (startsWith(inputs.tag || github.ref_name, 'server-') ||
+           (startsWith(inputs.tag || github.ref_name, 'windows-') && needs.windows.result == 'success') ||
+           (startsWith(inputs.tag || github.ref_name, 'android-') && needs.android.result == 'success') ||
+           (!startsWith(inputs.tag || github.ref_name, 'server-') &&
+            !startsWith(inputs.tag || github.ref_name, 'windows-') &&
+            !startsWith(inputs.tag || github.ref_name, 'android-') &&
+            needs.windows.result == 'success' &&
+            (needs.android.result == 'success' || vars.ANDROID_RELEASES_ENABLED != 'true'))) }}
     runs-on: ubuntu-24.04
     env:
       GH_TOKEN: ${{ github.token }}
