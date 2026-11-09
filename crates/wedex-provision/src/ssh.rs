@@ -6,6 +6,7 @@ use russh::{
     ChannelMsg,
 };
 use std::{
+    borrow::Cow,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -14,6 +15,14 @@ use std::{
 };
 use tokio::sync::{mpsc, oneshot};
 use zeroize::Zeroizing;
+
+pub(crate) fn posix_script(source: &str) -> Cow<'_, str> {
+    if source.contains("\r\n") {
+        Cow::Owned(source.replace("\r\n", "\n"))
+    } else {
+        Cow::Borrowed(source)
+    }
+}
 
 pub struct Handler {
     pub pin_name: String,
@@ -126,16 +135,17 @@ impl Remote {
             !self.cancelled.load(Ordering::Relaxed),
             "Установка отменена"
         );
+        let command = posix_script(command);
         let mut channel = self.session.channel_open_session().await?;
         let sudo = if privileged { self.sudo.as_ref() } else { None };
         let wrapped = if let Some(password) = sudo {
             if password.is_empty() {
-                format!("sudo -n -- /bin/sh -c {}", crate::quote(command))
+                format!("sudo -n -- /bin/sh -c {}", crate::quote(&command))
             } else {
-                format!("sudo -S -p '' -- /bin/sh -c {}", crate::quote(command))
+                format!("sudo -S -p '' -- /bin/sh -c {}", crate::quote(&command))
             }
         } else {
-            format!("/bin/sh -c {}", crate::quote(command))
+            format!("/bin/sh -c {}", crate::quote(&command))
         };
         channel.exec(true, wrapped).await?;
         if let Some(password) = sudo.filter(|s| !s.is_empty()) {
@@ -203,6 +213,34 @@ impl Remote {
 mod tests {
     use super::*;
     use russh::client::Handler as _;
+    #[test]
+    fn windows_line_endings_are_removed_from_inline_and_uploaded_scripts() {
+        for source in [include_str!("probe.sh"), include_str!("install.sh")] {
+            let lf = source.replace("\r\n", "\n");
+            let crlf = lf.replace('\n', "\r\n");
+            assert_eq!(posix_script(&crlf), lf);
+            assert_eq!(posix_script(&lf), lf);
+        }
+    }
+    #[cfg(unix)]
+    #[test]
+    fn linux_shell_executes_normalized_windows_script_with_heredoc() {
+        let source = "set -eu\r\nvalue='two words'\r\ncat <<'END'\r\n$value\r\nEND\r\nprintf '%s\\n' \"$value\"\r\n";
+        let run = |script: &str| {
+            std::process::Command::new("/bin/sh")
+                .args(["-c", script])
+                .output()
+                .unwrap()
+        };
+        assert!(!run(source).status.success());
+        let fixed = run(&posix_script(source));
+        assert!(
+            fixed.status.success(),
+            "{}",
+            String::from_utf8_lossy(&fixed.stderr)
+        );
+        assert_eq!(fixed.stdout, b"$value\ntwo words\n");
+    }
     fn key() -> PublicKeyOrCertificate {
         russh::keys::PublicKey::from_openssh(
             "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJeLWu7O2vvsXdUQ5bO6BcYTG9dD4x1rvv2kgzSm4sKp",

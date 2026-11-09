@@ -260,9 +260,10 @@ async fn run(
         let unit = service_unit(request.port);
         let update_service = wedex_cloud::update::SERVICE_UNIT.as_bytes();
         let update_path = wedex_cloud::update::PATH_UNIT.as_bytes();
+        let installer = ssh::posix_script(include_str!("install.sh"));
         for (name, bytes) in [
             ("wedex-server", binary),
-            ("install.sh", include_bytes!("install.sh").as_slice()),
+            ("install.sh", installer.as_bytes()),
             ("server.json", &config),
             ("install.json", &manifest),
             ("wedex.service", unit.as_bytes()),

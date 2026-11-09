@@ -1,0 +1,2 @@
+# These files are embedded in the Windows EXE and executed by Linux /bin/sh.
+*.sh text eol=lf

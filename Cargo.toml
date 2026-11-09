@@ -1,6 +1,6 @@
 [package]
 name = "wedex"
-version = "0.8.3"
+version = "0.8.4"
 edition = "2021"
 description = "Sonora — a native music client with Last.fm discovery"
 license = "MIT"
