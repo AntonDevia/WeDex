@@ -8,6 +8,31 @@ import static org.junit.Assert.*;
 
 /** Uses only synthetic credentials in the test device's private application data. */
 public final class AndroidIntegrationTest {
+    @Test public void updateProviderSharesOnlyThePrivateUpdateDirectory() throws Exception {
+        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        String authority = context.getPackageName() + ".updates";
+        android.content.pm.ProviderInfo provider = context.getPackageManager().resolveContentProvider(authority, 0);
+        assertNotNull(provider);
+        assertFalse(provider.exported);
+        assertTrue(provider.grantUriPermissions);
+        java.io.File folder = new java.io.File(context.getFilesDir(), "updates");
+        assertTrue(folder.isDirectory() || folder.mkdirs());
+        java.io.File apk = new java.io.File(folder, "synthetic-update.apk");
+        try {
+            try (java.io.FileOutputStream stream = new java.io.FileOutputStream(apk)) { stream.write(77); }
+            android.net.Uri uri = androidx.core.content.FileProvider.getUriForFile(context, authority, apk);
+            assertEquals("content", uri.getScheme());
+            try (java.io.InputStream stream = context.getContentResolver().openInputStream(uri)) {
+                assertNotNull(stream);
+                assertEquals(77, stream.read());
+            }
+            try {
+                androidx.core.content.FileProvider.getUriForFile(context, authority,
+                    new java.io.File(context.getFilesDir(), "outside-updates.txt"));
+                fail("Other private application files must not be shared with the installer");
+            } catch (IllegalArgumentException expected) { /* directory confinement */ }
+        } finally { assertTrue(apk.delete()); }
+    }
     @Test public void credentialsSurviveReopeningWithoutPlaintextAndUseFreshNonces() throws Exception {
         Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
         SecretStore store = new SecretStore(context);
