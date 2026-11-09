@@ -1,0 +1,35 @@
+name: Windows checks
+on: [push, pull_request]
+jobs:
+  server-linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      - uses: Swatinem/rust-cache@v2
+      - run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - run: cargo test --locked -p wedex-cloud -p wedex-provision
+      - run: python3 tools/build_server.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wedex-server-linux-x86_64
+          path: assets/server/wedex-server-x86_64-linux-musl
+  check:
+    needs: server-linux
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: wedex-server-linux-x86_64
+          path: assets/server
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt -- --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo test --workspace --locked
+      - run: cargo build --release --locked --bin sonora

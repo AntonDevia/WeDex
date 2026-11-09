@@ -1,0 +1,17 @@
+{
+  "name": "wedex-figma-local-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local MCP server connected to an open Figma file through a development plugin",
+  "scripts": {
+    "setup": "node setup.mjs",
+    "start": "node server.mjs",
+    "broker": "node broker.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "zod": "^3.25.76"
+  }
+}

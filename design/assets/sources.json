@@ -1,0 +1,44 @@
+[
+  {
+    "name": "charlie",
+    "artist": "Charlie Puth",
+    "album": "Voicenotes",
+    "url": "https://is1-ssl.mzstatic.com/image/thumb/Music125/v4/a8/e2/1b/a8e21b3b-9c8d-2974-2318-6bcd4c9d2370/075679884336.jpg/600x600bb.jpg",
+    "source": "https://music.apple.com/us/album/voicenotes/1293229669?uo=4"
+  },
+  {
+    "name": "weeknd",
+    "artist": "The Weeknd",
+    "album": "After Hours",
+    "url": "https://is1-ssl.mzstatic.com/image/thumb/Music125/v4/2b/b9/fe/2bb9fef5-d7f3-8345-25a9-db0e79fde4e4/20UMGIM11048.rgb.jpg/600x600bb.jpg",
+    "source": "https://music.apple.com/us/album/after-hours/1499385848?uo=4"
+  },
+  {
+    "name": "rihanna",
+    "artist": "Rihanna",
+    "album": "ANTI (Deluxe)",
+    "url": "https://is1-ssl.mzstatic.com/image/thumb/Music126/v4/9c/da/90/9cda90c9-df1a-078b-319c-bdf2801e8d1f/16UMGIM03373.rgb.jpg/600x600bb.jpg",
+    "source": "https://music.apple.com/us/album/anti-deluxe/1440924615?uo=4"
+  },
+  {
+    "name": "massive",
+    "artist": "Massive Attack",
+    "album": "Mezzanine (Deluxe)",
+    "url": "https://is1-ssl.mzstatic.com/image/thumb/Music115/v4/8a/c1/04/8ac104fb-d37e-1433-5d2e-805710d7a7c4/00602567930983.rgb.jpg/600x600bb.jpg",
+    "source": "https://music.apple.com/us/album/mezzanine-deluxe/1428684976?uo=4"
+  },
+  {
+    "name": "arctic",
+    "artist": "Arctic Monkeys",
+    "album": "AM",
+    "url": "https://is1-ssl.mzstatic.com/image/thumb/Music211/v4/69/9c/b5/699cb5d6-115c-ff73-9d26-e57ea4350d72/887828031795.png/600x600bb.jpg",
+    "source": "https://music.apple.com/us/album/am/663097964?uo=4"
+  },
+  {
+    "name": "oneheart",
+    "artist": "Øneheart & reidenshi",
+    "album": "Snowfall - Single",
+    "url": "https://is1-ssl.mzstatic.com/image/thumb/Music116/v4/c3/3d/f1/c33df11e-1244-3f80-672c-9b7f88010f17/1963620475841_cover.jpg/600x600bb.jpg",
+    "source": "https://music.apple.com/us/album/snowfall-single/1601135214?uo=4"
+  }
+]

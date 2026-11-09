@@ -1,0 +1,17 @@
+import fs from 'node:fs';
+const root=new URL('../',import.meta.url),read=name=>JSON.parse(fs.readFileSync(new URL(name,root),'utf8'));
+const status=read('figma-status.json'),refined=read('figma-control-refinements.json'),plan=read('finish-prototype/plan.json');
+const branding=fs.existsSync(new URL('figma-branding.json',root))?read('figma-branding.json'):null;
+const componentCount=branding?65:64;
+status.stage='interactive-prototype-refined-and-present-tested';
+status.prototypeUrl='https://www.figma.com/proto/hh9WPK6OnPYis1tL7S0jDY?node-id=8-157&starting-point-node-id=8%3A157&page-id=0%3A1&scaling=scale-down&content-scaling=fixed';
+Object.assign(status.overlays,refined.extra);
+status.blockingCondition=null;
+status.nextStep='Review the completed Figma prototype. MCP is available in this chat; keep the plugin running (its UI may stay hidden).';
+status.localChecks=`${plan.validation.reachable} reachable frames; ${plan.validation.controls} reaction targets; ${plan.validation.linkedActions} destination actions; no missing destinations, self-navigation or multiple-action reactions. Eight MCP tests and native plugin guard/rollback checks passed.`;
+status.liveChecks={date:new Date().toISOString(),connection:'figma_local tools in Codex -> localhost broker -> running native Figma plugin; UI hidden with figma.ui.hide()',toolsVerified:['figma_status','figma_get_file','figma_execute_code','figma_apply_prototype','figma_screenshot'],prototype:{controls:plan.validation.controls,screens:plan.expectedFrames.length,readBackVerified:true,components:64,componentSets:10,eqBands:10,eqRangeDb:[-6,6],eqStepDb:1,eqVariants:13,sliderClickPositions:[25,50,75]},presentClicks:['Sonora -> Search','Search -> Queue -> track; overlay dismissed','EQ band gain +5; other bands unchanged','EQ reset -> zero; warm preset -> [4,3,2,1,0,-1,-1,0,1,2]','EQ closes with Escape','Timeline rail click -> 75%; volume rail click -> 25%','Versions -> choose Hitmo -> confirm','Microphone -> listening -> recognized -> catalogue results','Library -> Favorites -> Playlists -> On repeat','Playlist track list scroll -> last track visible','Playlist Listen -> Sonora How Long'],prototypeScale:'scale-down / fixed; full player visible',ambient:'Looping light movement observed in Present',pluginManifest:'.local/figma-local-mcp/figma-template/manifest.json',automatedTests:8,limitations:['Figma uses demonstration catalogue content; no live audio or microphone capture.','Timeline/volume prototype states are discrete. EQ uses clickable 1 dB steps; continuous audio controls belong to Rust.']};
+status.liveChecks.prototype.components=componentCount;
+if(branding){status.branding={wordmark:branding.logo.name,componentId:branding.logo.component.componentId,brandPage:branding.logo.board.pageId,brandBoard:branding.logo.board.boardId,url:branding.logo.figmaUrl,families:[branding.typography.family,branding.typography.displayFamily],migratedTextNodes:branding.typography.updatedTextNodes,sidebarLogos:branding.logo.installation.installed};status.liveChecks.branding=status.branding;}
+fs.writeFileSync(new URL('figma-status.json',root),JSON.stringify(status,null,2)+'\n');
+fs.writeFileSync(new URL('figma-local-mcp-validation.json',root),JSON.stringify({fileKey:status.fileKey,prototypeUrl:status.prototypeUrl,...status.liveChecks},null,2)+'\n');
+console.log(JSON.stringify({stage:status.stage,frames:plan.expectedFrames.length,controls:plan.validation.controls,components:componentCount,blockingCondition:null}));

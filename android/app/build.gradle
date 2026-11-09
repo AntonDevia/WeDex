@@ -1,0 +1,53 @@
+plugins { id 'com.android.application' }
+
+android {
+    namespace 'app.wedex.music'
+    compileSdk 35
+    ndkVersion '28.2.13676358'
+    defaultConfig {
+        applicationId 'app.wedex.music'
+        minSdk 26
+        targetSdk 35
+        versionCode 800
+        versionName '0.8.0'
+        testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
+        manifestPlaceholders = [appLabel: 'WeDex']
+    }
+    buildTypes {
+        debug { debuggable true; jniDebuggable false }
+        qa {
+            initWith debug
+            applicationIdSuffix '.qa'
+            versionNameSuffix '-qa'
+            manifestPlaceholders = [appLabel: 'WeDex QA']
+            matchingFallbacks = ['debug']
+        }
+        release { minifyEnabled false }
+    }
+    if (System.getenv('WEDEX_ANDROID_KEYSTORE')) {
+        signingConfigs {
+            distribution {
+                storeFile file(System.getenv('WEDEX_ANDROID_KEYSTORE'))
+                storePassword System.getenv('WEDEX_ANDROID_STORE_PASSWORD')
+                keyAlias System.getenv('WEDEX_ANDROID_KEY_ALIAS')
+                keyPassword System.getenv('WEDEX_ANDROID_KEY_PASSWORD')
+            }
+        }
+        buildTypes.debug.signingConfig signingConfigs.distribution
+        buildTypes.release.signingConfig signingConfigs.distribution
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    packaging { jniLibs { useLegacyPackaging = false } }
+}
+
+dependencies {
+    implementation platform('org.jetbrains.kotlin:kotlin-bom:1.8.22')
+    implementation 'androidx.games:games-activity:4.4.0'
+    implementation 'androidx.appcompat:appcompat:1.7.1'
+    androidTestImplementation 'androidx.test:runner:1.6.2'
+    androidTestImplementation 'androidx.test:rules:1.6.1'
+    androidTestImplementation 'junit:junit:4.13.2'
+}

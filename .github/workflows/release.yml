@@ -1,0 +1,107 @@
+name: Publish WeDex updates
+on:
+  push:
+    tags: ['v*', 'windows-v*', 'android-v*', 'server-v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag
+        required: true
+permissions:
+  contents: write
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+  WEDEX_UPDATE_REPOSITORY: ${{ github.repository }}
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      - uses: Swatinem/rust-cache@v2
+      - run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - run: python3 tools/build_server.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-server
+          path: assets/server/wedex-server-x86_64-linux-musl
+  windows:
+    needs: linux
+    if: ${{ !startsWith(inputs.tag || github.ref_name, 'server-') && !startsWith(inputs.tag || github.ref_name, 'android-') }}
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-server
+          path: assets/server
+      - run: cargo build --release --locked --bin sonora
+      - shell: pwsh
+        run: Copy-Item target/release/sonora.exe WeDex-Windows.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: WeDex-Windows.exe
+  android:
+    if: ${{ vars.ANDROID_RELEASES_ENABLED == 'true' && !startsWith(inputs.tag || github.ref_name, 'server-') && !startsWith(inputs.tag || github.ref_name, 'windows-') }}
+    runs-on: ubuntu-24.04
+    env:
+      KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      WEDEX_ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+      WEDEX_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      WEDEX_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require the existing signing key
+        run: test -n "$KEYSTORE_BASE64" || { echo 'Configure ANDROID_KEYSTORE_BASE64 and signing secrets before publishing Android updates'; exit 1; }
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,x86_64-linux-android
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0' 'ndk;28.2.13676358' 'cmake;3.22.1'
+      - run: cargo install cargo-ndk --version 4.1.2 --locked
+      - name: Prepare private signing and tool paths
+        run: |
+          mkdir -p .local
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/wedex.keystore"
+          echo "WEDEX_ANDROID_KEYSTORE=$RUNNER_TEMP/wedex.keystore" >> "$GITHUB_ENV"
+          python3 - <<'PY'
+          import json,os,pathlib,shutil
+          sdk=os.environ['ANDROID_HOME']
+          pathlib.Path('.local/android-tools.json').write_text(json.dumps({'sdk':sdk,'jdk':os.environ['JAVA_HOME'],'ndk':sdk+'/ndk/28.2.13676358','gradle':str(pathlib.Path(shutil.which('gradle')).resolve().parents[1])}))
+          PY
+      - run: python3 tools/build_android.py
+      - run: cp dist/WeDex-Android-*/*.apk WeDex-Android.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: WeDex-Android.apk
+  publish:
+    needs: [linux, windows, android]
+    if: ${{ always() && needs.linux.result == 'success' && (needs.windows.result == 'success' || needs.android.result == 'success' || startsWith(inputs.tag || github.ref_name, 'server-')) }}
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+      - run: |
+          mkdir release
+          if [ -f release-artifacts/windows/WeDex-Windows.exe ]; then cp release-artifacts/windows/WeDex-Windows.exe release/; fi
+          if [ -f release-artifacts/android/WeDex-Android.apk ]; then cp release-artifacts/android/WeDex-Android.apk release/; fi
+          if [[ "$RELEASE_TAG" == server-* ]]; then cp release-artifacts/linux-server/wedex-server-x86_64-linux-musl release/; fi
+          gh release view "$RELEASE_TAG" >/dev/null 2>&1 || gh release create "$RELEASE_TAG" --title "$RELEASE_TAG" --generate-notes
+          gh release upload "$RELEASE_TAG" release/* --clobber

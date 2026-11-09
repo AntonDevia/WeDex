@@ -1,0 +1,20 @@
+[package]
+name = "wedex-provision"
+version = "0.8.0"
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+anyhow = "1"
+base64 = "0.22"
+russh = { version = "=0.63.1", default-features = false, features = ["ring", "rsa"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tokio = { version = "1", features = ["rt-multi-thread", "time", "sync", "io-util", "net", "macros"] }
+uuid = { version = "1", features = ["v4"] }
+zeroize = "1"
+wedex-cloud = { path = "../wedex-cloud" }
+
+[dev-dependencies]
+tempfile = "3"

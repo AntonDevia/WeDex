@@ -1,0 +1,8 @@
+{
+  "name": "wedex-brand-assets",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {"render": "node render.mjs"},
+  "dependencies": {"@resvg/resvg-js": "2.6.2"}
+}

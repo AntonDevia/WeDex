@@ -1,0 +1,14 @@
+{
+  "repository": "https://github.com/DNFDEVS/medeo-font",
+  "revision": "72c9ca7cbd091f8b85ff2cee26e3dcc4e762f1a7",
+  "license": "SIL OFL 1.1",
+  "fonts": {
+    "MedeoSans-Bold.ttf": "b13a2def4316fb53e1ed216a42feabcfa493e7ffe45523efdb353e895d4eb1d5",
+    "MedeoSans-Medium.ttf": "64555831ed39126fb2c369bbf2b5fd53113bb3bf8f40bbbfbcfd0c11d2727c17",
+    "MedeoSans-Regular.ttf": "a99325c584c8d528448904cc2bc820b6975202f7947e5792d67611d2f5993a80",
+    "MedeoSans-SemiBold.ttf": "c1423245f2f73d6aeab487b957bc9076d9f49156db940dbae11d9cb4e141fa50",
+    "MedeoSansDisplay-Medium.ttf": "a7c859c7cf030b0cdf6715c097b6548e6c8540d913e4db631a75048297c3fba5",
+    "MedeoSansDisplay-Regular.ttf": "6b0ba95be0298216e7b822ff1017efb1c13b81e7d86d315f6e766b216e8b9338",
+    "MedeoSansDisplay-SemiBold.ttf": "6a11292d893d6b0f4223cfe825243e4b6a4a6f55b44a17cebf897a66710ec2d2"
+  }
+}

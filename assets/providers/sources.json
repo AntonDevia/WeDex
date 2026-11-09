@@ -1,0 +1,11 @@
+{
+  "source": "User-supplied music_icons_transparent (5).zip",
+  "marks": {
+    "yandex": "yandex_music",
+    "lastdotfm": "lastfm",
+    "soundcloud": "soundcloud",
+    "hitmo": "hitmo",
+    "youtube": "youtube_music"
+  },
+  "normalization": "Visible alpha bounds; proportions preserved; common 112px extent in transparent 128px canvas."
+}

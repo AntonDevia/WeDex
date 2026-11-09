@@ -1,0 +1,10 @@
+const kit=await figma.getNodeByIdAsync('3:2');await figma.setCurrentPageAsync(kit);
+if(kit.children.some(n=>n.name==='WeDex/Wordmark'))throw new Error('Wordmark already exists; inspect the branding ledger.');
+const right=Math.max(...kit.children.map(n=>n.x+n.width));
+const component=figma.createComponent();kit.appendChild(component);component.name='WeDex/Wordmark';component.fills=[];component.resize(136,136*838/2981);component.x=right+160;component.y=160;
+component.description='wedex · Flow. Original wave-shaped w and rounded x with Medeo Sans Display outlines. One-colour wordmark, no external font dependency. Minimum width 96px; usual sidebar width 136px.';
+const vector=figma.createNodeFromSvg(LOGO_SVG);component.appendChild(vector);vector.name='wedex · vector artwork';vector.rescale(136/vector.width);vector.x=0;vector.y=0;
+const color=await figma.variables.getVariableByIdAsync('VariableID:3:26');
+const createdNodeIds=[component.id];
+function bind(n){createdNodeIds.push(n.id);if('fills'in n&&Array.isArray(n.fills))n.fills=n.fills.map(p=>p.type==='SOLID'?figma.variables.setBoundVariableForPaint(p,'color',color):p);if('strokes'in n)n.strokes=n.strokes.map(p=>p.type==='SOLID'?figma.variables.setBoundVariableForPaint(p,'color',color):p);if('children'in n)for(const child of n.children)bind(child);}bind(vector);
+return {createdNodeIds,mutatedNodeIds:[],componentId:component.id,width:component.width,height:component.height,vectorLayers:createdNodeIds.length-1};

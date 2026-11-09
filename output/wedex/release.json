@@ -1,0 +1,7 @@
+{
+  "executable": "dist/WeDex-Medeo/WeDex-Sonora.exe",
+  "sha256": "6d8b47f3a3d9cb6874804090f522b067e2c2d27964cd13bccc1f680b9bf8a1a4",
+  "archive": "dist/WeDex-Medeo.zip",
+  "fontsEmbedded": true,
+  "fontLicenseIncluded": true
+}

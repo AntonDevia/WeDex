@@ -1,0 +1,40 @@
+<!doctype html><html lang="ru"><meta charset="utf-8"><style>
+*{box-sizing:border-box}body{margin:0;padding:24px;font:12px/1.5 Inter,Arial,sans-serif;background:var(--figma-color-bg,#17171c);color:var(--figma-color-text,#eee)}h1{font-size:20px;letter-spacing:-.6px;margin:0 0 5px}p{color:var(--figma-color-text-secondary,#aaa);margin:0 0 18px}label{display:block;margin:12px 0 5px}input,button{font:inherit;width:100%;border-radius:8px;padding:10px;border:1px solid var(--figma-color-border,#444);background:var(--figma-color-bg-secondary,#25252b);color:inherit}button{margin-top:16px;background:#e5e79b;color:#202117;border:0;font-weight:600;cursor:pointer}button:disabled{opacity:.5;cursor:default}#state{margin:16px 0 8px;padding:12px;border:1px solid var(--figma-color-border,#444);border-radius:8px;word-break:break-word}small{color:var(--figma-color-text-secondary,#aaa)}#file{white-space:nowrap;text-overflow:ellipsis;overflow:hidden}#port{width:100px} .row{display:flex;align-items:center;gap:12px}
+</style><h1>WeDex · Figma MCP</h1><p>Локальный мост к открытому файлу</p><div id="file">Получение файла…</div><label for="key">Ключ соединения</label><input id="key" type="password" autocomplete="off" spellcheck="false"><div class="row"><label for="port">Порт</label><input id="port" type="number" min="1024" max="65535" value="38473"></div><button id="connect">Подключить файл</button><div id="state">Ожидание подключения</div><small>Оставьте плагин открытым. Команды Codex смогут читать и менять этот файл.</small>
+<script>
+const pairing=__PAIRING__;
+const $=id=>document.getElementById(id);let context=null,clientId=null,running=false,busy=false,generation=0;
+$('key').value=pairing.key||'';$('port').value=pairing.port||38473;
+const send=m=>parent.postMessage({pluginMessage:m},'*');const state=s=>$('state').textContent=s;
+async function api(route,body,timeout=30000){const res=await fetch('http://localhost:'+Number($('port').value)+route,{method:'POST',headers:{Authorization:'Bearer '+$('key').value.trim(),'Content-Type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(timeout)});const v=res.status===204?null:await res.json();if(!res.ok){const e=new Error(v&&v.error||'HTTP '+res.status);e.status=res.status;throw e;}return v;}
+function idle(){running=false;generation++;$('connect').textContent='Подключить файл';$('connect').disabled=busy;}
+async function connect(){
+  if(busy)return;
+  if(running){running=false;generation++;try{await api('/plugin/detach',{clientId},3000);}catch{}clientId=null;idle();state('Отключено');return;}
+  if(!context)return state('Файл ещё не готов');
+  if(!/^[a-f0-9]{64}$/.test($('key').value.trim()))return state('Нужен ключ из локальной настройки MCP');
+  $('connect').disabled=true;
+  try{const v=await api('/plugin/attach',context,5000);clientId=v.clientId;running=true;const mine=++generation;send({type:'save',key:$('key').value.trim(),port:Number($('port').value)});$('connect').textContent='Отключить файл';$('connect').disabled=false;state('Подключено · '+clientId);poll(mine);}
+  catch(error){idle();state('Не удалось подключиться: '+error.message);}
+}
+async function poll(mine){
+  while(running&&generation===mine){
+    try{const v=await api('/plugin/poll',{clientId},28000);if(!running||generation!==mine)break;if(!v)continue;busy=true;$('connect').disabled=true;state('Выполняется: '+v.job.operation);send({type:'job',job:v.job});return;}
+    catch(error){if(error.status===410||error.status===401){idle();state(error.message);return;}state('Ожидание локального сервера…');await new Promise(r=>setTimeout(r,1500));}
+  }
+}
+onmessage=async event=>{
+  const m=event.data.pluginMessage;if(!m)return;
+  if(m.type==='init'){context=m.context;$('file').textContent=context.fileName;if(!pairing.key&&m.saved){$('key').value=m.saved.key;$('port').value=m.saved.port;}return;}
+  if(m.type==='context'){context=m.context;$('file').textContent=context.fileName;return;}
+  if(m.type==='result'){
+    let delivered=false;for(let attempt=0;attempt<3&&!delivered;attempt++)try{await api('/plugin/result',{...m,clientId},6000);delivered=true;}catch{await new Promise(r=>setTimeout(r,500));}
+    busy=false;$('connect').disabled=false;
+    if(!delivered){idle();state('Результат не доставлен. Операция могла завершиться. Проверьте файл перед повтором.');return;}
+    state(m.ok?'Подключено · '+clientId:'Ошибка: '+m.error);if(running)poll(generation);
+  }
+};
+$('connect').onclick=connect;
+setInterval(()=>{send({type:'context'});if(running&&context)api('/plugin/heartbeat',{clientId,pageId:context.pageId,pageName:context.pageName},5000).catch(()=>{});},15000);
+send({type:'ready'});
+</script></html>

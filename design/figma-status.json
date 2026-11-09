@@ -1,0 +1,1223 @@
+{
+  "fileKey": "hh9WPK6OnPYis1tL7S0jDY",
+  "fileUrl": "https://www.figma.com/design/hh9WPK6OnPYis1tL7S0jDY?node-id=8-157",
+  "sessionId": "a25fe83e-cc9c-42f0-a31f-aa4f14cb579c",
+  "scope": "Editable desktop glass-music prototype",
+  "stage": "interactive-prototype-refined-and-present-tested",
+  "screens": {
+    "sonora": {
+      "id": "8:157",
+      "name": "01 · Sonora — How Long",
+      "refs": {
+        "nav": {
+          "Sonora": "8:168",
+          "Поиск": "8:183",
+          "Медиатека": "8:194"
+        },
+        "rows": [],
+        "cards": [
+          {
+            "id": "8:323",
+            "track": 4
+          },
+          {
+            "id": "8:328",
+            "track": 2
+          },
+          {
+            "id": "8:333",
+            "track": 5
+          },
+          {
+            "id": "8:338",
+            "track": 1
+          },
+          {
+            "id": "8:343",
+            "track": 0
+          }
+        ],
+        "pills": [],
+        "settings": "8:212",
+        "profile": "8:219",
+        "tune": "8:224",
+        "queue": "8:237",
+        "currentTrack": "8:247",
+        "previous": "8:254",
+        "play": "8:259",
+        "next": "8:265",
+        "queueDock": "8:286",
+        "eq": "8:294",
+        "carousel": "8:322",
+        "discover": "8:351"
+      }
+    },
+    "sonoraNext": {
+      "id": "8:353",
+      "name": "02 · Sonora — Blinding Lights",
+      "refs": {
+        "nav": {
+          "Sonora": "8:364",
+          "Поиск": "8:379",
+          "Медиатека": "8:390"
+        },
+        "rows": [],
+        "cards": [
+          {
+            "id": "8:512",
+            "track": 5
+          },
+          {
+            "id": "8:517",
+            "track": 3
+          },
+          {
+            "id": "8:522",
+            "track": 0
+          },
+          {
+            "id": "8:527",
+            "track": 2
+          },
+          {
+            "id": "8:532",
+            "track": 1
+          }
+        ],
+        "pills": [],
+        "settings": "8:408",
+        "profile": "8:415",
+        "tune": "8:420",
+        "queue": "8:432",
+        "currentTrack": "8:442",
+        "previous": "8:448",
+        "play": "8:453",
+        "next": "8:457",
+        "queueDock": "8:478",
+        "eq": "8:486",
+        "carousel": "8:511",
+        "discover": "8:540"
+      }
+    },
+    "sonoraThird": {
+      "id": "8:542",
+      "name": "03 · Sonora — Needed Me",
+      "refs": {
+        "nav": {
+          "Sonora": "8:553",
+          "Поиск": "8:568",
+          "Медиатека": "8:579"
+        },
+        "rows": [],
+        "cards": [
+          {
+            "id": "8:701",
+            "track": 0
+          },
+          {
+            "id": "8:706",
+            "track": 4
+          },
+          {
+            "id": "8:711",
+            "track": 1
+          },
+          {
+            "id": "8:716",
+            "track": 3
+          },
+          {
+            "id": "8:721",
+            "track": 2
+          }
+        ],
+        "pills": [],
+        "settings": "8:597",
+        "profile": "8:604",
+        "tune": "8:609",
+        "queue": "8:621",
+        "currentTrack": "8:631",
+        "previous": "8:637",
+        "play": "8:642",
+        "next": "8:646",
+        "queueDock": "8:667",
+        "eq": "8:675",
+        "carousel": "8:700",
+        "discover": "8:729"
+      }
+    },
+    "search": {
+      "id": "10:335",
+      "name": "04 · Поиск — Обзор",
+      "refs": {
+        "nav": {
+          "Sonora": "10:346",
+          "Поиск": "10:361",
+          "Медиатека": "10:372"
+        },
+        "rows": [
+          {
+            "id": "10:527",
+            "track": 1
+          },
+          {
+            "id": "10:540",
+            "track": 4
+          },
+          {
+            "id": "10:574",
+            "track": 1
+          },
+          {
+            "id": "10:584",
+            "track": 2
+          },
+          {
+            "id": "10:594",
+            "track": 5
+          }
+        ],
+        "cards": [
+          {
+            "id": "10:506",
+            "track": 1
+          },
+          {
+            "id": "10:511",
+            "track": 0
+          },
+          {
+            "id": "10:516",
+            "track": 3
+          },
+          {
+            "id": "10:521",
+            "track": 5
+          }
+        ],
+        "pills": [],
+        "settings": "10:390",
+        "profile": "10:397",
+        "tune": "10:403",
+        "queue": "10:416",
+        "currentTrack": "10:426",
+        "previous": "10:432",
+        "play": "10:437",
+        "next": "10:441",
+        "queueDock": "10:462",
+        "eq": "10:470",
+        "mic": "10:498",
+        "searchField": "10:493",
+        "queuePanel": "10:566"
+      }
+    },
+    "results": {
+      "id": "10:604",
+      "name": "05 · Поиск — Результаты",
+      "refs": {
+        "nav": {
+          "Sonora": "10:615",
+          "Поиск": "10:630",
+          "Медиатека": "10:641"
+        },
+        "rows": [
+          {
+            "id": "10:793",
+            "track": 1
+          },
+          {
+            "id": "10:803",
+            "track": 1
+          },
+          {
+            "id": "10:813",
+            "track": 1
+          },
+          {
+            "id": "10:847",
+            "track": 1
+          },
+          {
+            "id": "10:857",
+            "track": 2
+          },
+          {
+            "id": "10:867",
+            "track": 5
+          }
+        ],
+        "cards": [
+          {
+            "id": "10:781",
+            "track": 1
+          }
+        ],
+        "pills": [
+          "10:773",
+          "10:775",
+          "10:777",
+          "10:779"
+        ],
+        "settings": "10:659",
+        "profile": "10:666",
+        "tune": "10:672",
+        "queue": "10:684",
+        "currentTrack": "10:694",
+        "previous": "10:700",
+        "play": "10:705",
+        "next": "10:709",
+        "queueDock": "10:730",
+        "eq": "10:738",
+        "mic": "10:766",
+        "searchField": "10:761",
+        "bestMatch": "10:788",
+        "queuePanel": "10:839"
+      }
+    },
+    "library": {
+      "id": "10:877",
+      "name": "06 · Медиатека — Главная",
+      "refs": {
+        "nav": {
+          "Sonora": "10:888",
+          "Поиск": "10:903",
+          "Медиатека": "10:914"
+        },
+        "rows": [
+          {
+            "id": "10:1093",
+            "track": 1
+          },
+          {
+            "id": "10:1103",
+            "track": 2
+          },
+          {
+            "id": "10:1113",
+            "track": 5
+          }
+        ],
+        "cards": [
+          {
+            "id": "10:1049",
+            "playlist": "Ночной маршрут"
+          },
+          {
+            "id": "10:1054",
+            "playlist": "На повторе"
+          },
+          {
+            "id": "10:1059",
+            "playlist": "Громче мыслей"
+          },
+          {
+            "id": "10:1064",
+            "playlist": "Медленный вечер"
+          }
+        ],
+        "pills": [
+          "10:1035",
+          "10:1037",
+          "10:1039"
+        ],
+        "settings": "10:932",
+        "profile": "10:939",
+        "tune": "10:945",
+        "queue": "10:957",
+        "currentTrack": "10:967",
+        "previous": "10:973",
+        "play": "10:978",
+        "next": "10:982",
+        "queueDock": "10:1003",
+        "eq": "10:1011",
+        "listen": "10:1044",
+        "queuePanel": "10:1085"
+      }
+    },
+    "favorites": {
+      "id": "10:1123",
+      "name": "07 · Медиатека — Понравившиеся",
+      "refs": {
+        "nav": {
+          "Sonora": "10:1134",
+          "Поиск": "10:1149",
+          "Медиатека": "10:1160"
+        },
+        "rows": [
+          {
+            "id": "10:1298",
+            "track": 0
+          },
+          {
+            "id": "10:1308",
+            "track": 1
+          },
+          {
+            "id": "10:1318",
+            "track": 2
+          },
+          {
+            "id": "10:1328",
+            "track": 3
+          },
+          {
+            "id": "10:1338",
+            "track": 4
+          },
+          {
+            "id": "10:1348",
+            "track": 5
+          },
+          {
+            "id": "10:1383",
+            "track": 1
+          },
+          {
+            "id": "10:1393",
+            "track": 2
+          },
+          {
+            "id": "10:1403",
+            "track": 5
+          }
+        ],
+        "cards": [],
+        "pills": [
+          "10:1281",
+          "10:1283",
+          "10:1285"
+        ],
+        "settings": "10:1178",
+        "profile": "10:1185",
+        "tune": "10:1191",
+        "queue": "10:1203",
+        "currentTrack": "10:1213",
+        "previous": "10:1219",
+        "play": "10:1224",
+        "next": "10:1228",
+        "queueDock": "10:1249",
+        "eq": "10:1257",
+        "listen": "10:1287",
+        "shuffle": "10:1289",
+        "import": "10:1291",
+        "queuePanel": "10:1375"
+      }
+    },
+    "playlist": {
+      "id": "10:1413",
+      "name": "08 · Медиатека — Ночной маршрут",
+      "refs": {
+        "nav": {
+          "Sonora": "10:1424",
+          "Поиск": "10:1439",
+          "Медиатека": "10:1450"
+        },
+        "rows": [
+          {
+            "id": "10:1590",
+            "track": 5
+          },
+          {
+            "id": "10:1600",
+            "track": 3
+          },
+          {
+            "id": "10:1610",
+            "track": 4
+          },
+          {
+            "id": "10:1620",
+            "track": 0
+          },
+          {
+            "id": "10:1630",
+            "track": 1
+          },
+          {
+            "id": "10:1640",
+            "track": 2
+          },
+          {
+            "id": "10:1674",
+            "track": 1
+          },
+          {
+            "id": "10:1684",
+            "track": 2
+          },
+          {
+            "id": "10:1694",
+            "track": 5
+          }
+        ],
+        "cards": [],
+        "pills": [],
+        "settings": "10:1468",
+        "profile": "10:1475",
+        "tune": "10:1481",
+        "queue": "10:1493",
+        "currentTrack": "10:1503",
+        "previous": "10:1509",
+        "play": "10:1514",
+        "next": "10:1518",
+        "queueDock": "10:1539",
+        "eq": "10:1547",
+        "back": "10:1568",
+        "listen": "10:1577",
+        "shuffle": "10:1579",
+        "more": "10:1581",
+        "queuePanel": "10:1666"
+      }
+    },
+    "sonoraMassive": {
+      "id": "12:1154",
+      "name": "09 · Sonora — Teardrop",
+      "refs": {
+        "nav": {
+          "Sonora": "12:1165",
+          "Поиск": "12:1180",
+          "Медиатека": "12:1191"
+        },
+        "rows": [],
+        "cards": [
+          {
+            "id": "12:1314",
+            "track": 1
+          },
+          {
+            "id": "12:1319",
+            "track": 5
+          },
+          {
+            "id": "12:1324",
+            "track": 2
+          },
+          {
+            "id": "12:1329",
+            "track": 4
+          },
+          {
+            "id": "12:1334",
+            "track": 3
+          }
+        ],
+        "pills": [],
+        "settings": "12:1209",
+        "profile": "12:1216",
+        "tune": "12:1221",
+        "queue": "12:1234",
+        "currentTrack": "12:1244",
+        "previous": "12:1250",
+        "play": "12:1255",
+        "next": "12:1259",
+        "queueDock": "12:1280",
+        "eq": "12:1288",
+        "carousel": "12:1313",
+        "discover": "12:1342"
+      }
+    },
+    "sonoraArctic": {
+      "id": "12:1344",
+      "name": "10 · Sonora — Do I Wanna Know",
+      "refs": {
+        "nav": {
+          "Sonora": "12:1355",
+          "Поиск": "12:1370",
+          "Медиатека": "12:1381"
+        },
+        "rows": [],
+        "cards": [
+          {
+            "id": "12:1503",
+            "track": 2
+          },
+          {
+            "id": "12:1508",
+            "track": 0
+          },
+          {
+            "id": "12:1513",
+            "track": 3
+          },
+          {
+            "id": "12:1518",
+            "track": 5
+          },
+          {
+            "id": "12:1523",
+            "track": 4
+          }
+        ],
+        "pills": [],
+        "settings": "12:1399",
+        "profile": "12:1406",
+        "tune": "12:1411",
+        "queue": "12:1423",
+        "currentTrack": "12:1433",
+        "previous": "12:1439",
+        "play": "12:1444",
+        "next": "12:1448",
+        "queueDock": "12:1469",
+        "eq": "12:1477",
+        "carousel": "12:1502",
+        "discover": "12:1531"
+      }
+    },
+    "sonoraSnowfall": {
+      "id": "12:1533",
+      "name": "11 · Sonora — snowfall",
+      "refs": {
+        "nav": {
+          "Sonora": "12:1544",
+          "Поиск": "12:1559",
+          "Медиатека": "12:1570"
+        },
+        "rows": [],
+        "cards": [
+          {
+            "id": "12:1692",
+            "track": 3
+          },
+          {
+            "id": "12:1697",
+            "track": 1
+          },
+          {
+            "id": "12:1702",
+            "track": 4
+          },
+          {
+            "id": "12:1707",
+            "track": 0
+          },
+          {
+            "id": "12:1712",
+            "track": 5
+          }
+        ],
+        "pills": [],
+        "settings": "12:1588",
+        "profile": "12:1595",
+        "tune": "12:1600",
+        "queue": "12:1612",
+        "currentTrack": "12:1622",
+        "previous": "12:1628",
+        "play": "12:1633",
+        "next": "12:1637",
+        "queueDock": "12:1658",
+        "eq": "12:1666",
+        "carousel": "12:1691",
+        "discover": "12:1720"
+      }
+    },
+    "playlists": {
+      "id": "12:1722",
+      "name": "12 · Медиатека — Плейлисты",
+      "refs": {
+        "nav": {
+          "Sonora": "12:1729",
+          "Поиск": "12:1730",
+          "Медиатека": "12:1731"
+        },
+        "rows": [
+          {
+            "id": "12:1795",
+            "track": 1
+          },
+          {
+            "id": "12:1796",
+            "track": 2
+          },
+          {
+            "id": "12:1797",
+            "track": 5
+          }
+        ],
+        "cards": [
+          {
+            "id": "12:1780",
+            "playlist": "Ночной маршрут"
+          },
+          {
+            "id": "12:1781",
+            "playlist": "На повторе"
+          },
+          {
+            "id": "12:1782",
+            "playlist": "Громче мыслей"
+          },
+          {
+            "id": "12:1783",
+            "playlist": "Медленный вечер"
+          }
+        ],
+        "pills": [
+          "12:1770",
+          "12:1771",
+          "12:1772"
+        ],
+        "settings": "12:1737",
+        "profile": "12:1740",
+        "tune": "12:1746",
+        "queue": "12:1747",
+        "currentTrack": "12:1750",
+        "previous": "12:1754",
+        "play": "12:1755",
+        "next": "12:1756",
+        "queueDock": "12:1763",
+        "eq": "12:1764"
+      }
+    },
+    "playlist0": {
+      "id": "12:1939",
+      "name": "13.1 · Плейлист — На повторе",
+      "refs": {
+        "nav": {
+          "Sonora": "12:1946",
+          "Поиск": "12:1947",
+          "Медиатека": "12:1948"
+        },
+        "rows": [
+          {
+            "id": "12:1996",
+            "track": 5
+          },
+          {
+            "id": "12:1997",
+            "track": 3
+          },
+          {
+            "id": "12:1998",
+            "track": 4
+          },
+          {
+            "id": "12:1999",
+            "track": 0
+          },
+          {
+            "id": "12:2000",
+            "track": 1
+          },
+          {
+            "id": "12:2001",
+            "track": 2
+          },
+          {
+            "id": "12:2013",
+            "track": 1
+          },
+          {
+            "id": "12:2014",
+            "track": 2
+          },
+          {
+            "id": "12:2015",
+            "track": 5
+          }
+        ],
+        "cards": [],
+        "pills": [],
+        "settings": "12:1954",
+        "profile": "12:1957",
+        "tune": "12:1963",
+        "queue": "12:1964",
+        "currentTrack": "12:1967",
+        "previous": "12:1971",
+        "play": "12:1972",
+        "next": "12:1973",
+        "queueDock": "12:1980",
+        "eq": "12:1981",
+        "back": "12:1984",
+        "more": "12:1992",
+        "listen": "12:1990",
+        "shuffle": "12:1991"
+      }
+    },
+    "playlist1": {
+      "id": "12:2196",
+      "name": "13.2 · Плейлист — Громче мыслей",
+      "refs": {
+        "nav": {
+          "Sonora": "12:2203",
+          "Поиск": "12:2204",
+          "Медиатека": "12:2205"
+        },
+        "rows": [
+          {
+            "id": "12:2253",
+            "track": 5
+          },
+          {
+            "id": "12:2254",
+            "track": 3
+          },
+          {
+            "id": "12:2255",
+            "track": 4
+          },
+          {
+            "id": "12:2256",
+            "track": 0
+          },
+          {
+            "id": "12:2257",
+            "track": 1
+          },
+          {
+            "id": "12:2258",
+            "track": 2
+          },
+          {
+            "id": "12:2270",
+            "track": 1
+          },
+          {
+            "id": "12:2271",
+            "track": 2
+          },
+          {
+            "id": "12:2272",
+            "track": 5
+          }
+        ],
+        "cards": [],
+        "pills": [],
+        "settings": "12:2211",
+        "profile": "12:2214",
+        "tune": "12:2220",
+        "queue": "12:2221",
+        "currentTrack": "12:2224",
+        "previous": "12:2228",
+        "play": "12:2229",
+        "next": "12:2230",
+        "queueDock": "12:2237",
+        "eq": "12:2238",
+        "back": "12:2241",
+        "more": "12:2249",
+        "listen": "12:2247",
+        "shuffle": "12:2248"
+      }
+    },
+    "playlist2": {
+      "id": "12:2453",
+      "name": "13.3 · Плейлист — Медленный вечер",
+      "refs": {
+        "nav": {
+          "Sonora": "12:2460",
+          "Поиск": "12:2461",
+          "Медиатека": "12:2462"
+        },
+        "rows": [
+          {
+            "id": "12:2510",
+            "track": 5
+          },
+          {
+            "id": "12:2511",
+            "track": 3
+          },
+          {
+            "id": "12:2512",
+            "track": 4
+          },
+          {
+            "id": "12:2513",
+            "track": 0
+          },
+          {
+            "id": "12:2514",
+            "track": 1
+          },
+          {
+            "id": "12:2515",
+            "track": 2
+          },
+          {
+            "id": "12:2527",
+            "track": 1
+          },
+          {
+            "id": "12:2528",
+            "track": 2
+          },
+          {
+            "id": "12:2529",
+            "track": 5
+          }
+        ],
+        "cards": [],
+        "pills": [],
+        "settings": "12:2468",
+        "profile": "12:2471",
+        "tune": "12:2477",
+        "queue": "12:2478",
+        "currentTrack": "12:2481",
+        "previous": "12:2485",
+        "play": "12:2486",
+        "next": "12:2487",
+        "queueDock": "12:2494",
+        "eq": "12:2495",
+        "back": "12:2498",
+        "more": "12:2506",
+        "listen": "12:2504",
+        "shuffle": "12:2505"
+      }
+    }
+  },
+  "overlays": {
+    "queue": {
+      "id": "13:2146",
+      "name": "14 · Overlay — Очередь",
+      "refs": {
+        "close": "13:2149",
+        "scrim": "13:2147",
+        "choices": [],
+        "rows": [
+          {
+            "id": "13:2158",
+            "track": 3
+          },
+          {
+            "id": "13:2169",
+            "track": 0
+          },
+          {
+            "id": "13:2180",
+            "track": 1
+          },
+          {
+            "id": "13:2190",
+            "track": 2
+          },
+          {
+            "id": "13:2200",
+            "track": 5
+          },
+          {
+            "id": "13:2210",
+            "track": 4
+          }
+        ]
+      },
+      "panel": "13:2148"
+    },
+    "eq": {
+      "id": "13:2221",
+      "name": "15 · Overlay — EQ Ровно",
+      "refs": {
+        "close": "13:2224",
+        "scrim": "13:2222",
+        "choices": [
+          "13:2232",
+          "13:2237",
+          "13:2242",
+          "13:2247",
+          "13:2252",
+          "13:2257",
+          "13:2262",
+          "13:2267",
+          "13:2272",
+          "13:2277"
+        ],
+        "rows": [],
+        "flat": "13:2282",
+        "warm": "13:2284",
+        "reset": "13:2286",
+        "done": "13:2288"
+      },
+      "panel": "13:2223"
+    },
+    "eqWarm": {
+      "id": "13:2290",
+      "name": "15 · Overlay — EQ Теплее",
+      "refs": {
+        "close": "13:2293",
+        "scrim": "13:2291",
+        "choices": [
+          "13:2301",
+          "13:2306",
+          "13:2311",
+          "13:2316",
+          "13:2321",
+          "13:2326",
+          "13:2331",
+          "13:2336",
+          "13:2341",
+          "13:2346"
+        ],
+        "rows": [],
+        "flat": "13:2351",
+        "warm": "13:2353",
+        "reset": "13:2355",
+        "done": "13:2357"
+      },
+      "panel": "13:2292"
+    },
+    "tune": {
+      "id": "13:2359",
+      "name": "16 · Overlay — Характер Знакомое",
+      "refs": {
+        "close": "13:2362",
+        "scrim": "13:2360",
+        "choices": [
+          "13:2369",
+          "13:2373"
+        ],
+        "rows": [],
+        "apply": "13:2381"
+      },
+      "panel": "13:2361"
+    },
+    "tuneExplore": {
+      "id": "13:2383",
+      "name": "16 · Overlay — Характер Открытия",
+      "refs": {
+        "close": "13:2386",
+        "scrim": "13:2384",
+        "choices": [
+          "13:2393",
+          "13:2397"
+        ],
+        "rows": [],
+        "apply": "13:2405"
+      },
+      "panel": "13:2385"
+    },
+    "settings": {
+      "id": "13:2407",
+      "name": "17 · Overlay — Источники Обзор",
+      "refs": {
+        "close": "13:2410",
+        "scrim": "13:2408",
+        "choices": [],
+        "rows": [],
+        "connect": "13:2447",
+        "done": "13:2458"
+      },
+      "panel": "13:2409"
+    },
+    "settingsConnected": {
+      "id": "13:2460",
+      "name": "17 · Overlay — Источники Подключено",
+      "refs": {
+        "close": "13:2463",
+        "scrim": "13:2461",
+        "choices": [],
+        "rows": [],
+        "connect": "13:2500",
+        "done": "13:2511"
+      },
+      "panel": "13:2462"
+    },
+    "recognition": {
+      "id": "13:2513",
+      "name": "18 · Overlay — Распознавание Слушаем",
+      "refs": {
+        "close": "13:2516",
+        "scrim": "13:2514",
+        "choices": [],
+        "rows": [],
+        "cancel": "13:2531"
+      },
+      "panel": "13:2515"
+    },
+    "recognized": {
+      "id": "13:2533",
+      "name": "18 · Overlay — Распознавание Найдено",
+      "refs": {
+        "close": "13:2536",
+        "scrim": "13:2534",
+        "choices": [],
+        "rows": [],
+        "find": "13:2546"
+      },
+      "panel": "13:2535"
+    },
+    "versions": {
+      "id": "13:2548",
+      "name": "19 · Overlay — Версии Выбор",
+      "refs": {
+        "close": "13:2551",
+        "scrim": "13:2549",
+        "choices": [
+          "13:2566",
+          "13:2578",
+          "13:2590"
+        ],
+        "rows": [],
+        "trackLabel": "13:2557",
+        "apply": "13:2595"
+      },
+      "panel": "13:2550"
+    },
+    "versionSelected": {
+      "id": "13:2597",
+      "name": "19 · Overlay — Версии Выбрана",
+      "refs": {
+        "close": "13:2600",
+        "scrim": "13:2598",
+        "choices": [
+          "13:2615",
+          "13:2627",
+          "13:2638"
+        ],
+        "rows": [],
+        "trackLabel": "13:2606",
+        "apply": "13:2643"
+      },
+      "panel": "13:2599"
+    },
+    "versionYandex": {
+      "id": "14:2291",
+      "name": "20 · Overlay — Версия Яндекс",
+      "refs": {
+        "close": "14:2294",
+        "scrim": "14:2292",
+        "choices": [
+          "14:2303",
+          "14:2309",
+          "14:2315"
+        ],
+        "rows": [],
+        "trackLabel": "14:2296",
+        "apply": "14:2316"
+      },
+      "panel": "14:2293"
+    },
+    "versionSoundcloud": {
+      "id": "14:2338",
+      "name": "20 · Overlay — Версия SoundCloud",
+      "refs": {
+        "close": "14:2341",
+        "scrim": "14:2339",
+        "choices": [
+          "14:2350",
+          "14:2356",
+          "14:2362"
+        ],
+        "rows": [],
+        "trackLabel": "14:2343",
+        "apply": "14:2363"
+      },
+      "panel": "14:2340"
+    },
+    "toast": {
+      "id": "14:2385",
+      "name": "21 · Overlay — Медиатека обновлена",
+      "refs": {},
+      "panel": "14:2386"
+    },
+    "eqReset": {
+      "id": "17:4728",
+      "name": "22 · Overlay — EQ Сброшен",
+      "refs": {
+        "close": "17:4731",
+        "scrim": "17:4729",
+        "choices": [
+          "17:4735",
+          "17:4738",
+          "17:4741",
+          "17:4744",
+          "17:4747",
+          "17:4750",
+          "17:4753",
+          "17:4756",
+          "17:4759",
+          "17:4762"
+        ],
+        "rows": [],
+        "flat": "17:4765",
+        "warm": "17:4766",
+        "reset": "17:4767",
+        "done": "17:4768"
+      },
+      "panel": "17:4730"
+    }
+  },
+  "blockingCondition": null,
+  "nextStep": "Review the completed Figma prototype. MCP is available in this chat; keep the plugin running (its UI may stay hidden).",
+  "localChecks": "30 reachable frames; 422 reaction targets; 374 destination actions; no missing destinations, self-navigation or multiple-action reactions. Eight MCP tests and native plugin guard/rollback checks passed.",
+  "screenshots": [
+    "sonora-preview.png",
+    "search-preview.png",
+    "library-preview.png"
+  ],
+  "liveChecks": {
+    "date": "2026-11-06T14:59:27.085Z",
+    "connection": "figma_local tools in Codex -> localhost broker -> running native Figma plugin; UI hidden with figma.ui.hide()",
+    "toolsVerified": [
+      "figma_status",
+      "figma_get_file",
+      "figma_execute_code",
+      "figma_apply_prototype",
+      "figma_screenshot"
+    ],
+    "prototype": {
+      "controls": 422,
+      "screens": 30,
+      "readBackVerified": true,
+      "components": 65,
+      "componentSets": 10,
+      "eqBands": 10,
+      "eqRangeDb": [
+        -6,
+        6
+      ],
+      "eqStepDb": 1,
+      "eqVariants": 13,
+      "sliderClickPositions": [
+        25,
+        50,
+        75
+      ]
+    },
+    "presentClicks": [
+      "Sonora -> Search",
+      "Search -> Queue -> track; overlay dismissed",
+      "EQ band gain +5; other bands unchanged",
+      "EQ reset -> zero; warm preset -> [4,3,2,1,0,-1,-1,0,1,2]",
+      "EQ closes with Escape",
+      "Timeline rail click -> 75%; volume rail click -> 25%",
+      "Versions -> choose Hitmo -> confirm",
+      "Microphone -> listening -> recognized -> catalogue results",
+      "Library -> Favorites -> Playlists -> On repeat",
+      "Playlist track list scroll -> last track visible",
+      "Playlist Listen -> Sonora How Long"
+    ],
+    "prototypeScale": "scale-down / fixed; full player visible",
+    "ambient": "Looping light movement observed in Present",
+    "pluginManifest": ".local/figma-local-mcp/figma-template/manifest.json",
+    "automatedTests": 8,
+    "limitations": [
+      "Figma uses demonstration catalogue content; no live audio or microphone capture.",
+      "Timeline/volume prototype states are discrete. EQ uses clickable 1 dB steps; continuous audio controls belong to Rust."
+    ],
+    "branding": {
+      "wordmark": "wedex · Flow",
+      "componentId": "23:3019",
+      "brandPage": "23:3115",
+      "brandBoard": "23:3116",
+      "url": "https://www.figma.com/design/hh9WPK6OnPYis1tL7S0jDY?node-id=23-3116",
+      "families": [
+        "Medeo Sans",
+        "Medeo Sans Display"
+      ],
+      "migratedTextNodes": 918,
+      "sidebarLogos": 15
+    }
+  },
+  "prototypeUrl": "https://www.figma.com/proto/hh9WPK6OnPYis1tL7S0jDY?node-id=8-157&starting-point-node-id=8%3A157&page-id=0%3A1&scaling=scale-down&content-scaling=fixed",
+  "branding": {
+    "wordmark": "wedex · Flow",
+    "componentId": "23:3019",
+    "brandPage": "23:3115",
+    "brandBoard": "23:3116",
+    "url": "https://www.figma.com/design/hh9WPK6OnPYis1tL7S0jDY?node-id=23-3116",
+    "families": [
+      "Medeo Sans",
+      "Medeo Sans Display"
+    ],
+    "migratedTextNodes": 918,
+    "sidebarLogos": 15
+  }
+}

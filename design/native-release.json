@@ -1,0 +1,15 @@
+{
+  "executable": "dist/WeDex-0.5.0/WeDex-Sonora.exe",
+  "sha256": "2341d3ad18d75394657a40b77c1e2cf09b650a5621dc459fb1619017f3445ed4",
+  "referenceFile": "hh9WPK6OnPYis1tL7S0jDY",
+  "fontsEmbedded": true,
+  "responsive": true,
+  "themes": [
+    "system",
+    "light",
+    "dark"
+  ],
+  "audioPrefetch": true,
+  "localCloud": true,
+  "cloudProtocol": 1
+}
