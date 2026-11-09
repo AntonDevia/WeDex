@@ -41,6 +41,7 @@ pub struct Release {
 }
 #[derive(Deserialize)]
 struct Asset {
+    id: u64,
     name: String,
     browser_download_url: String,
     digest: Option<String>,
@@ -154,7 +155,10 @@ fn select(
                         .take(12000)
                         .collect(),
                     page: release.html_url.clone(),
-                    url: asset.browser_download_url,
+                    url: format!(
+                        "https://api.github.com/repos/{repo}/releases/assets/{}",
+                        asset.id
+                    ),
                     sha256: hash.to_ascii_lowercase(),
                     size: asset.size,
                     target,
@@ -172,6 +176,7 @@ pub fn download(release: &Release, folder: &Path, progress: impl Fn(f32)) -> Res
     let result = (|| {
         let mut response = http()?
             .get(&release.url)
+            .header("Accept", "application/octet-stream")
             .timeout(Duration::from_secs(600))
             .send()?
             .error_for_status()?;
@@ -251,7 +256,7 @@ mod tests {
         assert!(version("v1.2.3-beta").is_err());
         assert!(repository("../bad/repo").is_err());
         assert!(repository("x/y?token=z").is_err());
-        let input = serde_json::json!([{"tag_name":"server-v1.1.0","body":"server","html_url":"https://github.com/a/b/releases","draft":false,"prerelease":false,"assets":[{"name":Target::Server.asset(),"size":20,"digest":format!("sha256:{}","a".repeat(64)),"browser_download_url":"https://github.com/a/b/releases/download/server-v1.1.0/wedex-server-x86_64-linux-musl"}]}]);
+        let input = serde_json::json!([{"tag_name":"server-v1.1.0","body":"server","html_url":"https://github.com/a/b/releases","draft":false,"prerelease":false,"assets":[{"id":123,"name":Target::Server.asset(),"size":20,"digest":format!("sha256:{}","a".repeat(64)),"browser_download_url":"https://github.com/a/b/releases/download/server-v1.1.0/wedex-server-x86_64-linux-musl"}]}]);
         assert!(select(
             serde_json::from_value(input.clone()).unwrap(),
             "a/b",
@@ -260,17 +265,18 @@ mod tests {
         )
         .unwrap()
         .is_none());
+        let chosen = select(
+            serde_json::from_value(input).unwrap(),
+            "a/b",
+            Target::Server,
+            "1.0.0",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(chosen.version, "1.1.0");
         assert_eq!(
-            select(
-                serde_json::from_value(input).unwrap(),
-                "a/b",
-                Target::Server,
-                "1.0.0"
-            )
-            .unwrap()
-            .unwrap()
-            .version,
-            "1.1.0"
+            chosen.url,
+            "https://api.github.com/repos/a/b/releases/assets/123"
         );
     }
 }
