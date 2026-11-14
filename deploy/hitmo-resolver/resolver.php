@@ -22,7 +22,7 @@ function mirror_request(string $url): array {
     if (!$ips) throw new RuntimeException('DNS unavailable');
     foreach ($ips as $ip) {
         if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4 | FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)
-            || str_starts_with($ip, '100.64.') || str_starts_with($ip, '169.254.')) {
+            || str_starts_with($ip, '100.') || str_starts_with($ip, '169.254.')) {
             throw new RuntimeException('Non-public destination');
         }
     }
@@ -30,7 +30,7 @@ function mirror_request(string $url): array {
     $c = curl_init($url);
     curl_setopt_array($c, [
         CURLOPT_FOLLOWLOCATION => false, CURLOPT_CONNECTTIMEOUT => 5, CURLOPT_TIMEOUT => 15,
-        CURLOPT_PROTOCOLS => CURLPROTO_HTTPS, CURLOPT_USERAGENT => 'WeDex-Mirror/1.0',
+        CURLOPT_PROTOCOLS => CURLPROTO_HTTPS, CURLOPT_USERAGENT => 'Mozilla/5.0 (compatible; WeDexMirror/1.0)',
         CURLOPT_RESOLVE => [$host . ':443:' . $ips[0]],
         CURLOPT_HEADERFUNCTION => function ($c, $line) use (&$location, &$refresh) {
             if (stripos($line, 'Location:') === 0) $location = trim(substr($line, 9));
@@ -107,7 +107,10 @@ function mirror_resolve(?array $previous = null): array {
         $warning = $e->getMessage();
         if (!$previous || ($previous['service'] ?? '') !== 'wedex-hitmo-mirror') throw $e;
         $origin = mirror_origin($previous['origin'] ?? '');
-        mirror_verify($origin); // Never refresh a cached address without checking it.
+        try { mirror_verify($origin); } // Never refresh a cached address without checking it.
+        catch (RuntimeException $cached) {
+            throw new RuntimeException('Discovery: ' . $warning . '; cached mirror: ' . $cached->getMessage());
+        }
         $discovery = 'last_verified';
     }
     return [

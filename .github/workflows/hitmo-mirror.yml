@@ -34,6 +34,7 @@ jobs:
             cp deploy/hitmo-resolver/seed.json .local/mirror/previous.json
           fi
       - name: Discover and validate catalogue
+        shell: bash
         run: php deploy/hitmo-resolver/resolver.php .local/mirror/previous.json | tee .local/mirror/result.json
       - name: Publish only a verified address
         run: python3 tools/publish_hitmo_mirror.py
