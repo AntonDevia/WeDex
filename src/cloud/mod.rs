@@ -1,4 +1,5 @@
 mod connections_sync;
+mod hitmo;
 mod listening;
 #[cfg(windows)]
 pub mod vps;
@@ -81,6 +82,7 @@ enum Job {
     Paired(u64, anyhow::Result<Connection>),
 }
 pub struct Cloud {
+    hitmo: hitmo::Discovery,
     last_update: Instant,
     update_started: Instant,
     sync: connections_sync::Sync,
@@ -189,6 +191,7 @@ impl Cloud {
             last_update: Instant::now(),
             update_started: Instant::now(),
             sync: Default::default(),
+            hitmo: Default::default(),
             last_vault: Instant::now(),
             #[cfg(windows)]
             provision: None,
@@ -224,6 +227,7 @@ impl Cloud {
         self.view.status = "Что-то пошло не так".into();
     }
     fn attach(&mut self, mut connection: Connection, save: bool) -> anyhow::Result<()> {
+        self.hitmo = Default::default();
         let owner =
             serde_json::from_str::<wedex_cloud::admin::Owner>(&store::secret("cloud-owner"))
                 .ok()
@@ -365,6 +369,7 @@ impl Cloud {
                 Ok(())
             }
             Action::Stop => {
+                self.hitmo = Default::default();
                 self.generation += 1;
                 self.view.busy = false;
                 self.client = None;
@@ -412,6 +417,7 @@ impl Cloud {
                 }
             }
             Action::Disconnect => {
+                self.hitmo = Default::default();
                 #[cfg(windows)]
                 if let Some(mut worker) = self.provision.take() {
                     worker.cancel();
@@ -530,9 +536,27 @@ impl Cloud {
         self.sync.values = values;
     }
     pub fn connection_changes(&mut self) -> Vec<(String, String)> {
+        if self.sync.changes.iter().any(|(name, _)| name == "hitmo") {
+            // A synchronized user edit takes priority over an in-flight probe.
+            self.hitmo = Default::default();
+            return std::mem::take(&mut self.sync.changes);
+        }
+        if let Some(origin) = self.hitmo.take(
+            self.sync
+                .values
+                .get("hitmo")
+                .map(String::as_str)
+                .unwrap_or(""),
+        ) {
+            self.connection_edited("hitmo", &origin);
+            self.sync.changes.push(("hitmo".into(), origin));
+        }
         std::mem::take(&mut self.sync.changes)
     }
     pub fn connection_edited(&mut self, name: &str, value: &str) {
+        if name == "hitmo" {
+            self.hitmo = Default::default();
+        }
         if let Some(connection) = &self.connection {
             if let Some(key) = &connection.sync_key {
                 if let Err(e) =
@@ -846,7 +870,18 @@ impl Cloud {
                 client::Event::Message(ServerMessage::Snapshot {
                     mut devices,
                     statistics,
+                    hitmo_mirror,
                 }) => {
+                    if let Some(mirror) = hitmo_mirror {
+                        self.hitmo.offer(
+                            mirror,
+                            self.sync
+                                .values
+                                .get("hitmo")
+                                .map(String::as_str)
+                                .unwrap_or(""),
+                        );
+                    }
                     if let Some((id, value, at)) = &self.pending_volume {
                         if let Some(d) = devices.iter_mut().find(|d| &d.id == id) {
                             if at.elapsed() < Duration::from_secs(2)

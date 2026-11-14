@@ -21,8 +21,7 @@ function mirror_request(string $url): array {
     $ips = gethostbynamel($host) ?: [];
     if (!$ips) throw new RuntimeException('DNS unavailable');
     foreach ($ips as $ip) {
-        if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4 | FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)
-            || str_starts_with($ip, '100.') || str_starts_with($ip, '169.254.')) {
+        if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4 | FILTER_FLAG_GLOBAL_RANGE)) {
             throw new RuntimeException('Non-public destination');
         }
     }

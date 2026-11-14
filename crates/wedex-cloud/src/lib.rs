@@ -1,6 +1,7 @@
 pub mod admin;
 pub mod client;
 mod database;
+pub mod mirror;
 pub mod protocol;
 pub mod server;
 pub mod update;

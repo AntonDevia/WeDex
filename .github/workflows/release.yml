@@ -117,6 +117,13 @@ jobs:
           mkdir release
           if [ -f release-artifacts/windows/WeDex-Windows.exe ]; then cp release-artifacts/windows/WeDex-Windows.exe release/; fi
           if [ -f release-artifacts/android/WeDex-Android.apk ]; then cp release-artifacts/android/WeDex-Android.apk release/; fi
-          if [[ "$RELEASE_TAG" == server-* ]]; then cp release-artifacts/linux-server/wedex-server-x86_64-linux-musl release/; fi
-          gh release view "$RELEASE_TAG" >/dev/null 2>&1 || gh release create "$RELEASE_TAG" --title "$RELEASE_TAG" --generate-notes
+          if [[ "$RELEASE_TAG" == server-* || "$RELEASE_TAG" == v* ]]; then cp release-artifacts/linux-server/wedex-server-x86_64-linux-musl release/; fi
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            notes="docs/RELEASE_${RELEASE_TAG##*v}.md"
+            if [ -f "$notes" ]; then
+              gh release create "$RELEASE_TAG" --title "$RELEASE_TAG" --notes-file "$notes"
+            else
+              gh release create "$RELEASE_TAG" --title "$RELEASE_TAG" --generate-notes
+            fi
+          fi
           gh release upload "$RELEASE_TAG" release/* --clobber

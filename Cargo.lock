@@ -6061,7 +6061,7 @@ dependencies = [
 
 [[package]]
 name = "wedex"
-version = "0.8.4"
+version = "0.8.5"
 dependencies = [
  "android_logger",
  "anyhow",
@@ -6100,7 +6100,7 @@ dependencies = [
 
 [[package]]
 name = "wedex-cloud"
-version = "0.8.3"
+version = "0.8.5"
 dependencies = [
  "anyhow",
  "axum",

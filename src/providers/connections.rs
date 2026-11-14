@@ -101,6 +101,21 @@ impl Services {
 mod tests {
     use super::*;
     #[test]
+    #[ignore = "Checks the public Hitmo catalogue without credentials or playback"]
+    fn live_discovered_hitmo_catalogue() {
+        let mut services = Services::new(String::new(), String::new(), String::new());
+        services.hitmo_base = "https://ru.hitmox.net/".into();
+        let tracks = services.hitmotop_search("music").unwrap();
+        assert!(!tracks.is_empty());
+        assert!(tracks
+            .iter()
+            .all(|t| t.provider == Provider::Hitmotop && !t.title.is_empty()));
+        println!(
+            "Verified public Hitmo catalogue: {} parsed tracks",
+            tracks.len()
+        );
+    }
+    #[test]
     #[ignore = "Checks configured Yandex and Last.fm credentials without saving or playing audio"]
     fn live_configured_connections() {
         let service = Services::new(String::new(), String::new(), String::new());

@@ -42,6 +42,7 @@ struct Hub {
     connected: Mutex<HashMap<String, Connected>>,
     changes: broadcast::Sender<()>,
     pairing_rate: Mutex<(u64, u32)>,
+    hitmo_mirror: Mutex<Option<crate::mirror::HitmoMirror>>,
 }
 
 pub struct RunningServer {
@@ -182,6 +183,13 @@ pub fn start_configured(
         connected: Mutex::new(HashMap::new()),
         changes,
         pairing_rate: Mutex::new((0, 0)),
+        hitmo_mirror: Mutex::new(
+            std::fs::read(config.data_dir.join("hitmo-mirror.json"))
+                .ok()
+                .filter(|b| b.len() <= 8192)
+                .and_then(|b| serde_json::from_slice::<crate::mirror::HitmoMirror>(&b).ok())
+                .filter(|m| m.valid(now_ms())),
+        ),
     });
     let routes = Router::new()
         .route("/", get(|| async { Html(include_str!("remote.html")) }))
@@ -207,6 +215,8 @@ pub fn start_configured(
     let handle = axum_server::Handle::new();
     let worker_handle = handle.clone();
     let cert = certificate.clone();
+    let mirror_hub = hub.clone();
+    let discover_mirrors = public_host.is_some();
     let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
     let finished = std::thread::Builder::new()
         .name("wedex-server".into())
@@ -223,6 +233,27 @@ pub fn start_configured(
                 }
             };
             runtime.block_on(async move {
+                if discover_mirrors {
+                    tokio::spawn(async move {
+                        let mut timer = tokio::time::interval(Duration::from_secs(15 * 60));
+                        loop {
+                            timer.tick().await;
+                            match crate::mirror::fetch(&mirror_hub.update_repo).await {
+                                Ok(mirror) => {
+                                    if let Ok(bytes) = serde_json::to_vec(&mirror) {
+                                        let _ = private_write(
+                                            &mirror_hub.data_dir.join("hitmo-mirror.json"),
+                                            &bytes,
+                                        );
+                                    }
+                                    *mirror_hub.hitmo_mirror.lock().unwrap() = Some(mirror);
+                                    let _ = mirror_hub.changes.send(());
+                                }
+                                Err(e) => eprintln!("WeDex mirror discovery: {e}"),
+                            }
+                        }
+                    });
+                }
                 let tls =
                     match axum_server::tls_rustls::RustlsConfig::from_pem(cert.into_bytes(), key)
                         .await
@@ -422,6 +453,12 @@ fn snapshot(hub: &Hub) -> Result<ServerMessage> {
     Ok(ServerMessage::Snapshot {
         devices,
         statistics: hub.db.statistics()?,
+        hitmo_mirror: hub
+            .hitmo_mirror
+            .lock()
+            .unwrap()
+            .clone()
+            .filter(|m| m.valid(now_ms())),
     })
 }
 async fn connection(mut socket: WebSocket, hub: Arc<Hub>) {

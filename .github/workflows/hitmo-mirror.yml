@@ -34,7 +34,16 @@ jobs:
             cp deploy/hitmo-resolver/seed.json .local/mirror/previous.json
           fi
       - name: Discover and validate catalogue
+        id: resolve
         shell: bash
-        run: php deploy/hitmo-resolver/resolver.php .local/mirror/previous.json | tee .local/mirror/result.json
+        run: |
+          if php deploy/hitmo-resolver/resolver.php .local/mirror/previous.json > .local/mirror/result.json; then
+            echo 'verified=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'verified=false' >> "$GITHUB_OUTPUT"
+            echo '::warning::Hitmo is unavailable from this runner. The last verified record is unchanged.'
+          fi
+          cat .local/mirror/result.json
       - name: Publish only a verified address
+        if: steps.resolve.outputs.verified == 'true'
         run: python3 tools/publish_hitmo_mirror.py

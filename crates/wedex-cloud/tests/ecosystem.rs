@@ -5,6 +5,63 @@ use wedex_cloud::{client, server, *};
 
 type Socket =
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cached_mirror_is_delivered_over_authenticated_tls_and_legacy_snapshots_still_decode() {
+    let folder = tempfile::tempdir().unwrap();
+    let mirror = mirror::HitmoMirror {
+        service: "wedex-hitmo-mirror".into(),
+        schema: 1,
+        source: "https://hitmos.pro/".into(),
+        origin: "https://ru.hitmox.net/".into(),
+        checked_at_ms: now_ms(),
+    };
+    std::fs::write(
+        folder.path().join("hitmo-mirror.json"),
+        serde_json::to_vec(&mirror).unwrap(),
+    )
+    .unwrap();
+    let server = server::start(server::Config {
+        data_dir: folder.path().into(),
+        bind: "127.0.0.1:0".parse().unwrap(),
+    })
+    .unwrap();
+    let peer = client::pair(&server.invitation(false).unwrap(), "Mirror test", false)
+        .await
+        .unwrap();
+    let mut socket = connect(&peer).await;
+    let event = wait(&mut socket, |m| {
+        matches!(
+            m,
+            ServerMessage::Snapshot {
+                hitmo_mirror: Some(_),
+                ..
+            }
+        )
+    })
+    .await;
+    if let ServerMessage::Snapshot { hitmo_mirror, .. } = event {
+        assert_eq!(hitmo_mirror, Some(mirror));
+    }
+    // Old servers omit the field and remain readable by the new client.
+    let legacy = serde_json::to_value(ServerMessage::Snapshot {
+        devices: vec![],
+        statistics: Statistics::default(),
+        hitmo_mirror: None,
+    })
+    .unwrap();
+    assert!(legacy.get("hitmo_mirror").is_none());
+    let decoded: ServerMessage = serde_json::from_value(legacy).unwrap();
+    assert!(matches!(
+        decoded,
+        ServerMessage::Snapshot {
+            hitmo_mirror: None,
+            ..
+        }
+    ));
+    drop(socket);
+    drop(server);
+}
 async fn connect(connection: &client::Connection) -> Socket {
     let mut roots = rustls::RootCertStore::empty();
     for cert in rustls_pemfile::certs(&mut connection.certificate.as_bytes()) {
@@ -227,7 +284,7 @@ async fn real_tls_pairing_remote_control_statistics_revocation_and_restart() {
     reconnect.endpoint = restarted.endpoint.clone();
     let mut socket = connect(&reconnect).await;
     wait(&mut socket, |m| {
-        matches!(m, ServerMessage::Snapshot { statistics, devices }
+        matches!(m, ServerMessage::Snapshot { statistics, devices, .. }
         if statistics.listened_ms == 65000 && devices.len() == 1)
     })
     .await;

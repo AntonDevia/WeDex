@@ -287,6 +287,8 @@ pub enum ServerMessage {
     Snapshot {
         devices: Vec<Device>,
         statistics: Statistics,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        hitmo_mirror: Option<crate::mirror::HitmoMirror>,
     },
     Execute {
         delivery: Delivery,
