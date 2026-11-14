@@ -15,6 +15,7 @@ async fn cached_mirror_is_delivered_over_authenticated_tls_and_legacy_snapshots_
         source: "https://hitmos.pro/".into(),
         origin: "https://ru.hitmox.net/".into(),
         checked_at_ms: now_ms(),
+        alternatives: vec!["https://ru.hitmox.org/".into()],
     };
     std::fs::write(
         folder.path().join("hitmo-mirror.json"),

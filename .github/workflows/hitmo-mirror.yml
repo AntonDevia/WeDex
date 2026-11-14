@@ -5,7 +5,7 @@ on:
     - cron: '17 * * * *'
   push:
     branches: [main]
-    paths: ['deploy/hitmo-resolver/**', '.github/workflows/hitmo-mirror.yml']
+    paths: ['deploy/hitmo-resolver/**', 'tools/*hitmo*', '.github/workflows/hitmo-mirror.yml']
 permissions:
   contents: write
 concurrency:
@@ -17,9 +17,12 @@ jobs:
     timeout-minutes: 6
     env:
       GH_TOKEN: ${{ github.token }}
+      HITMO_RESOLVER_URL: ${{ vars.HITMO_RESOLVER_URL }}
     steps:
       - uses: actions/checkout@v4
       - run: php -l deploy/hitmo-resolver/resolver.php && php deploy/hitmo-resolver/test.php
+      - run: node --test deploy/hitmo-resolver/test-google.cjs
+      - run: python3 -m unittest discover -s tools -p test_hitmo_service.py
       - name: Read last verified address
         run: |
           mkdir -p .local/mirror
@@ -37,11 +40,11 @@ jobs:
         id: resolve
         shell: bash
         run: |
-          if php deploy/hitmo-resolver/resolver.php .local/mirror/previous.json > .local/mirror/result.json; then
+          if [ -n "$HITMO_RESOLVER_URL" ] && python3 tools/read_hitmo_service.py "$HITMO_RESOLVER_URL" .local/mirror/result.json --previous .local/mirror/previous.json --verify-ru; then
             echo 'verified=true' >> "$GITHUB_OUTPUT"
           else
             echo 'verified=false' >> "$GITHUB_OUTPUT"
-            echo '::warning::Hitmo is unavailable from this runner. The last verified record is unchanged.'
+            echo '::warning::No mirror passed Russian availability checks. The last verified record is unchanged.'
           fi
           cat .local/mirror/result.json
       - name: Publish only a verified address

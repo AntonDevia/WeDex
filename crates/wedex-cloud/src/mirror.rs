@@ -10,6 +10,8 @@ pub struct HitmoMirror {
     pub source: String,
     pub origin: String,
     pub checked_at_ms: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub alternatives: Vec<String>,
 }
 impl HitmoMirror {
     pub fn valid(&self, now: u64) -> bool {
@@ -17,6 +19,8 @@ impl HitmoMirror {
             && self.schema == 1
             && self.source == "https://hitmos.pro/"
             && valid_origin(&self.origin)
+            && self.alternatives.len() <= 5
+            && self.alternatives.iter().all(|o| valid_origin(o))
             && self.checked_at_ms > 0
             && self.checked_at_ms <= now.saturating_add(300_000)
         // This is only a candidate. Each client checks it over HTTPS before use,
@@ -118,6 +122,7 @@ mod tests {
             source: "https://hitmos.pro/".into(),
             origin: "https://ru.hitmox.net/".into(),
             checked_at_ms: 1_000_000_000,
+            alternatives: vec![],
         };
         assert!(m.valid(1_000_000_000));
         assert!(m.valid(2_000_000_000));

@@ -13,22 +13,25 @@ pub struct Discovery {
 }
 impl Discovery {
     pub fn offer(&mut self, mirror: HitmoMirror, current: &str) {
+        let candidates: Vec<_> = std::iter::once(&mirror.origin)
+            .chain(&mirror.alternatives)
+            .filter(|o| o.as_str() != current)
+            .cloned()
+            .collect();
+        let identity = candidates.join("|");
         if !mirror.valid(wedex_cloud::now_ms())
             || !valid_origin(current)
-            || mirror.origin == current
+            || candidates.is_empty()
             || self.pending.is_some()
             || self.attempt.as_ref().is_some_and(|(from, to, at)| {
-                from == current
-                    && to == &mirror.origin
-                    && at.elapsed() < Duration::from_secs(15 * 60)
+                from == current && to == &identity && at.elapsed() < Duration::from_secs(15 * 60)
             })
         {
             return;
         }
-        self.attempt = Some((current.into(), mirror.origin.clone(), Instant::now()));
+        self.attempt = Some((current.into(), identity, Instant::now()));
         let (send, receive) = mpsc::channel();
         let from = current.to_owned();
-        let origin = mirror.origin;
         std::thread::spawn(move || {
             let checked = (|| -> anyhow::Result<Option<String>> {
                 let mut services = Services::new(String::new(), String::new(), String::new());
@@ -46,12 +49,16 @@ impl Discovery {
                 {
                     return Ok(None);
                 }
-                services.hitmo_base = origin.clone();
-                anyhow::ensure!(
-                    !services.hitmotop_search("music")?.is_empty(),
-                    "Mirror returned no tracks"
-                );
-                Ok(Some(origin))
+                for origin in candidates {
+                    services.hitmo_base = origin.clone();
+                    if services
+                        .hitmotop_search("music")
+                        .is_ok_and(|t| !t.is_empty())
+                    {
+                        return Ok(Some(origin));
+                    }
+                }
+                anyhow::bail!("No discovered Hitmo mirror is reachable from this device")
             })();
             // Discovery failure leaves the last setting intact, without interrupting playback.
             if let Err(e) = &checked {
