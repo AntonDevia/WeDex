@@ -1,0 +1,7 @@
+{
+  "service": "wedex-hitmo-mirror",
+  "schema": 1,
+  "source": "user-provided bootstrap fallback; must be verified before publication",
+  "origin": "https://ru.hitmox.net/",
+  "checked_at_ms": 0
+}

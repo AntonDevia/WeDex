@@ -1,0 +1,39 @@
+name: Discover Hitmo mirror
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 * * * *'
+  push:
+    branches: [main]
+    paths: ['deploy/hitmo-resolver/**', '.github/workflows/hitmo-mirror.yml']
+permissions:
+  contents: write
+concurrency:
+  group: hitmo-mirror
+  cancel-in-progress: false
+jobs:
+  discover:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: php -l deploy/hitmo-resolver/resolver.php && php deploy/hitmo-resolver/test.php
+      - name: Read last verified address
+        run: |
+          mkdir -p .local/mirror
+          if gh api "repos/$GITHUB_REPOSITORY/contents/mirror.json?ref=hitmo-mirror" > .local/mirror/previous-api.json; then
+            python3 - <<'PY'
+          import base64,json,pathlib
+          p=pathlib.Path('.local/mirror')
+          v=json.loads((p/'previous-api.json').read_text())
+          (p/'previous.json').write_bytes(base64.b64decode(v['content']))
+          PY
+          else
+            cp deploy/hitmo-resolver/seed.json .local/mirror/previous.json
+          fi
+      - name: Discover and validate catalogue
+        run: php deploy/hitmo-resolver/resolver.php .local/mirror/previous.json | tee .local/mirror/result.json
+      - name: Publish only a verified address
+        run: python3 tools/publish_hitmo_mirror.py
