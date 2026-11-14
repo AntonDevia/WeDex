@@ -28,7 +28,10 @@ def read(url):
     if len(body) > 8192:
         raise ValueError('Resolver record is too large')
     value = json.loads(body)
-    assert value.get('service') == 'wedex-hitmo-mirror' and value.get('schema') == 1
+    if value.get('error'):
+        raise RuntimeError('Google resolver: ' + str(value['error'])[:200])
+    if value.get('service') != 'wedex-hitmo-mirror' or value.get('schema') != 1:
+        raise ValueError('Unexpected resolver record')
     assert value.get('source') == 'https://hitmos.pro/' and 'error' not in value
     assert re.fullmatch(r'https://(?:[a-z0-9-]+\.)*hitmo[a-z0-9-]*\.[a-z]{2,15}/', value['origin'])
     now = int(time.time() * 1000)
@@ -42,14 +45,16 @@ def valid_origin(value):
         r'https://(?:[a-z0-9-]+\.)*hitmo[a-z0-9-]*\.[a-z]{2,15}/', value) is not None
 
 
-def russian_check(origin):
+def measurement(host, path='/', query='', residential=True):
     """Normal HTTPS GET from two public Russian probes, without account tokens."""
-    assert valid_origin(origin)
     api = 'https://api.globalping.io/v1/measurements'
-    payload = {'type': 'http', 'target': urllib.parse.urlsplit(origin).hostname,
-               'locations': [{'country': 'RU', 'tags': ['eyeball-network']}], 'limit': 2,
+    location = {'country': 'RU'}
+    if residential:
+        location['tags'] = ['eyeball-network']
+    payload = {'type': 'http', 'target': host,
+               'locations': [location], 'limit': 2,
                'measurementOptions': {'protocol': 'HTTPS',
-                                      'request': {'method': 'GET', 'path': '/search', 'query': 'q=music'}}}
+                                      'request': {'method': 'GET', 'path': path, 'query': query}}}
     req = urllib.request.Request(api, data=json.dumps(payload).encode(),
                                  headers={'Content-Type': 'application/json'})
     with urllib.request.urlopen(req, timeout=20) as r:
@@ -67,6 +72,38 @@ def russian_check(origin):
             break
     else:
         raise TimeoutError('Russian availability check timed out')
+    return measurement, result
+
+
+def probe_discovery():
+    """A separate source path when the Google deployment is temporarily unavailable."""
+    mid, result = measurement('hitmos.pro', residential=False)
+    origins = []
+    for item in result.get('results', []):
+        p, v = item.get('probe', {}), item.get('result', {})
+        if p.get('country') != 'RU' or not v.get('tls', {}).get('authorized'):
+            continue
+        if v.get('statusCode') not in (301, 302, 303, 307, 308):
+            continue
+        location = v.get('headers', {}).get('location', '')
+        if not isinstance(location, str):
+            continue
+        u = urllib.parse.urlsplit(location)
+        if u.scheme != 'https' or u.username or u.password or u.port not in (None, 443):
+            continue
+        origin = f'https://{u.hostname}/'
+        if valid_origin(origin) and origin not in origins:
+            origins.append(origin)
+    if not origins:
+        raise RuntimeError('No verified bootstrap redirect from the Russian probes')
+    return {'service': 'wedex-hitmo-mirror', 'schema': 1, 'source': 'https://hitmos.pro/',
+            'origin': origins[0], 'alternatives': origins[1:], 'checked_at_ms': int(time.time() * 1000),
+            'discovery': 'globalping_redirect', 'source_measurement': mid}
+
+
+def russian_check(origin):
+    assert valid_origin(origin)
+    mid, result = measurement(urllib.parse.urlsplit(origin).hostname, '/search', 'q=music')
     reports = []
     for item in result.get('results', []):
         p, v = item.get('probe', {}), item.get('result', {})
@@ -78,16 +115,20 @@ def russian_check(origin):
         # Do not publish raw headers, cookies, probe IPs or complete response bodies.
         reports.append({'country': p.get('country'), 'network': p.get('network'),
                         'asn': p.get('asn'), 'http_status': v.get('statusCode'), 'ok': ok})
-    return {'measurement': measurement, 'probes': reports,
+    return {'measurement': mid, 'probes': reports,
             'ok': len(reports) >= 2 and all(p['ok'] for p in reports)}
 
 
 def resolve(url, previous=None, verify_ru=False):
-    value = read(url)
+    try:
+        value = read(url) if url else probe_discovery()
+    except Exception as e:
+        print('Google discovery unavailable:', type(e).__name__, str(e)[:200])
+        value = probe_discovery()
     discovered = value['origin']
     old = [] if not previous else [previous.get('origin')] + previous.get('alternatives', [])
     # Prefer the last working Russian mirror; still discover new alternatives each run.
-    candidates = list(dict.fromkeys(o for o in old[:1] + [discovered] + old[1:] if valid_origin(o)))[:5]
+    candidates = list(dict.fromkeys(o for o in old[:1] + [discovered] + value.get('alternatives', []) + old[1:] if valid_origin(o)))[:5]
     if verify_ru:
         checks = []
         for origin in candidates:
@@ -99,7 +140,7 @@ def resolve(url, previous=None, verify_ru=False):
                     value['discovered_origin'] = discovered
                     value['discovered_at_ms'] = value['checked_at_ms']
                     value['checked_at_ms'] = int(time.time() * 1000)
-                    value['discovery'] = 'google_redirect_with_ru_validation'
+                    value['discovery'] += '_with_ru_validation'
                     value['ru_checks'] = checks
                     break
             except Exception as e:

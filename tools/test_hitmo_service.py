@@ -30,6 +30,13 @@ class Mirrors(unittest.TestCase):
             with self.assertRaises(ValueError):
                 service.google_url(bad)
 
+    def test_google_outage_uses_independent_probe_discovery(self):
+        fresh = {'origin': 'https://ru.hitmox.org/', 'checked_at_ms': 10, 'discovery': 'globalping_redirect'}
+        with patch.object(service, 'read', side_effect=RuntimeError('temporary error')), patch.object(service, 'probe_discovery', return_value=fresh), patch.object(service, 'russian_check', return_value={'ok': True}):
+            v = service.resolve('unused', {'origin': 'https://ru.hitmox.net/'}, True)
+        self.assertEqual(v['origin'], 'https://ru.hitmox.net/')
+        self.assertEqual(v['discovery'], 'globalping_redirect_with_ru_validation')
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -14,7 +14,7 @@ concurrency:
 jobs:
   discover:
     runs-on: ubuntu-24.04
-    timeout-minutes: 6
+    timeout-minutes: 10
     env:
       GH_TOKEN: ${{ github.token }}
       HITMO_RESOLVER_URL: ${{ vars.HITMO_RESOLVER_URL }}
@@ -40,13 +40,13 @@ jobs:
         id: resolve
         shell: bash
         run: |
-          if [ -n "$HITMO_RESOLVER_URL" ] && python3 tools/read_hitmo_service.py "$HITMO_RESOLVER_URL" .local/mirror/result.json --previous .local/mirror/previous.json --verify-ru; then
+          if python3 tools/read_hitmo_service.py "$HITMO_RESOLVER_URL" .local/mirror/result.json --previous .local/mirror/previous.json --verify-ru; then
             echo 'verified=true' >> "$GITHUB_OUTPUT"
           else
             echo 'verified=false' >> "$GITHUB_OUTPUT"
             echo '::warning::No mirror passed Russian availability checks. The last verified record is unchanged.'
           fi
-          cat .local/mirror/result.json
+          if [ -f .local/mirror/result.json ]; then cat .local/mirror/result.json; fi
       - name: Publish only a verified address
         if: steps.resolve.outputs.verified == 'true'
         run: python3 tools/publish_hitmo_mirror.py
