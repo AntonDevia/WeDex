@@ -1,0 +1,9 @@
+{
+  "service": "wedex-hitmo-mirror",
+  "schema": 1,
+  "source": "https://hitmos.pro/",
+  "origin": "https://ru.hitmox.net/",
+  "checked_at_ms": 1794657349416,
+  "discovery": "verified_from_desktop",
+  "discovery_warning": "hitmos.pro and cached mirror returned HTTP 403 from GitHub Actions; initial mirror verified from Windows with 25 parsed tracks"
+}
