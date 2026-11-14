@@ -3,15 +3,18 @@
   "schema": 1,
   "source": "https://hitmos.pro/",
   "origin": "https://ru.hitmox.net/",
-  "checked_at_ms": 1794659761738,
-  "discovery": "google_redirect_with_ru_validation",
-  "hops": 2,
+  "alternatives": [
+    "https://ru.hitmox.org/"
+  ],
+  "checked_at_ms": 1794660079837,
+  "discovery": "globalping_redirect_with_ru_validation",
+  "source_measurement": "2VfGlCefrJH95z9wU00021VDV",
   "discovered_origin": "https://ru.hitmox.org/",
-  "discovered_at_ms": 1794659615569,
+  "discovered_at_ms": 1794660076774,
   "ru_checks": [
     {
       "origin": "https://ru.hitmox.net/",
-      "measurement": "2YTrGO0BGxqk3S0q000021VDP",
+      "measurement": "2ac0FBWIcTJKIndPP00021VDV",
       "probes": [
         {
           "country": "RU",
@@ -26,12 +29,16 @@
           "asn": 31357,
           "http_status": 200,
           "ok": true
+        },
+        {
+          "country": "RU",
+          "network": "Datacheap",
+          "asn": 16262,
+          "http_status": 200,
+          "ok": true
         }
       ],
       "ok": true
     }
-  ],
-  "alternatives": [
-    "https://ru.hitmox.org/"
   ]
 }
