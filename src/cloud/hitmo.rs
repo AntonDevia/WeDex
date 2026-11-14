@@ -94,6 +94,44 @@ impl Discovery {
 mod tests {
     use super::*;
     #[test]
+    #[ignore = "Reads the public mirror feed and checks candidate catalogues without credentials or playback"]
+    fn live_public_feed_repairs_an_unreachable_origin_and_keeps_a_working_one() {
+        let mirror: HitmoMirror = reqwest::blocking::get(
+            "https://raw.githubusercontent.com/AntonDevia/WeDex/hitmo-mirror/mirror.json",
+        )
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .unwrap();
+        assert!(mirror.valid(wedex_cloud::now_ms()));
+        let mut d = Discovery::default();
+        let old = "https://unavailable.hitmo.invalid/";
+        d.offer(mirror.clone(), old);
+        let deadline = Instant::now() + Duration::from_secs(45);
+        let selected = loop {
+            if let Some(value) = d.take(old) {
+                break value;
+            }
+            assert!(
+                d.pending.is_some() && Instant::now() < deadline,
+                "No reachable catalogue was selected"
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        };
+        assert!(selected == mirror.origin || mirror.alternatives.contains(&selected));
+        d.offer(mirror, &selected);
+        while d.pending.is_some() {
+            assert!(
+                d.take(&selected).is_none(),
+                "Working mirror was unnecessarily replaced"
+            );
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        println!("Live mirror selection and preservation passed: {selected}");
+    }
+    #[test]
     fn late_probe_cannot_overwrite_a_user_edit() {
         let (tx, rx) = mpsc::channel();
         let mut d = Discovery {
