@@ -3,7 +3,35 @@
   "schema": 1,
   "source": "https://hitmos.pro/",
   "origin": "https://ru.hitmox.net/",
-  "checked_at_ms": 1794657349416,
-  "discovery": "verified_from_desktop",
-  "discovery_warning": "hitmos.pro and cached mirror returned HTTP 403 from GitHub Actions; initial mirror verified from Windows with 25 parsed tracks"
+  "checked_at_ms": 1794659761738,
+  "discovery": "google_redirect_with_ru_validation",
+  "hops": 2,
+  "discovered_origin": "https://ru.hitmox.org/",
+  "discovered_at_ms": 1794659615569,
+  "ru_checks": [
+    {
+      "origin": "https://ru.hitmox.net/",
+      "measurement": "2YTrGO0BGxqk3S0q000021VDP",
+      "probes": [
+        {
+          "country": "RU",
+          "network": "MTS",
+          "asn": 8359,
+          "http_status": 200,
+          "ok": true
+        },
+        {
+          "country": "RU",
+          "network": "Limited Company Information and Consulting Agency",
+          "asn": 31357,
+          "http_status": 200,
+          "ok": true
+        }
+      ],
+      "ok": true
+    }
+  ],
+  "alternatives": [
+    "https://ru.hitmox.org/"
+  ]
 }
