@@ -1,4 +1,4 @@
-"""Read the fixed Google Apps Script deployment; never proxy arbitrary URLs."""
+"""Discover public Hitmo mirrors through bounded monitoring services."""
 import json
 import re
 import argparse
@@ -45,16 +45,18 @@ def valid_origin(value):
         r'https://(?:[a-z0-9-]+\.)*hitmo[a-z0-9-]*\.[a-z]{2,15}/', value) is not None
 
 
-def measurement(host, path='/', query='', residential=True):
+def measurement(host, path='/', query='', residential=True, limit=2):
     """Normal HTTPS GET from two public Russian probes, without account tokens."""
     api = 'https://api.globalping.io/v1/measurements'
     location = {'country': 'RU'}
     if residential:
         location['tags'] = ['eyeball-network']
     payload = {'type': 'http', 'target': host,
-               'locations': [location], 'limit': 2,
+               'locations': [location], 'limit': limit,
                'measurementOptions': {'protocol': 'HTTPS',
-                                      'request': {'method': 'GET', 'path': path, 'query': query}}}
+                                      'request': {'method': 'GET', 'path': path}}}
+    if query:
+        payload['measurementOptions']['request']['query'] = query
     req = urllib.request.Request(api, data=json.dumps(payload).encode(),
                                  headers={'Content-Type': 'application/json'})
     with urllib.request.urlopen(req, timeout=20) as r:
@@ -81,7 +83,7 @@ def probe_discovery():
     origins = []
     for item in result.get('results', []):
         p, v = item.get('probe', {}), item.get('result', {})
-        if p.get('country') != 'RU' or not v.get('tls', {}).get('authorized'):
+        if p.get('country') != 'RU' or not (v.get('tls') or {}).get('authorized'):
             continue
         if v.get('statusCode') not in (301, 302, 303, 307, 308):
             continue
@@ -103,28 +105,30 @@ def probe_discovery():
 
 def russian_check(origin):
     assert valid_origin(origin)
-    mid, result = measurement(urllib.parse.urlsplit(origin).hostname, '/search', 'q=music')
+    mid, result = measurement(urllib.parse.urlsplit(origin).hostname, '/search', 'q=music', limit=3)
     reports = []
     for item in result.get('results', []):
         p, v = item.get('probe', {}), item.get('result', {})
         body = (v.get('rawBody') or '').lower()
         catalogue = '/static/hitmo/' in body or '__next' in body and 'hitmo' in body
         ok = (p.get('country') == 'RU' and v.get('statusCode') == 200
-              and v.get('tls', {}).get('authorized') is True and catalogue
+              and (v.get('tls') or {}).get('authorized') is True and catalogue
               and 'captcha' not in body and 'access denied' not in body)
         # Do not publish raw headers, cookies, probe IPs or complete response bodies.
         reports.append({'country': p.get('country'), 'network': p.get('network'),
                         'asn': p.get('asn'), 'http_status': v.get('statusCode'), 'ok': ok})
-    return {'measurement': mid, 'probes': reports,
-            'ok': len(reports) >= 2 and all(p['ok'] for p in reports)}
+    networks = {p['asn'] for p in reports if p['ok'] and p.get('asn')}
+    return {'measurement': mid, 'probes': reports, 'ok': len(networks) >= 2}
 
 
 def resolve(url, previous=None, verify_ru=False):
     try:
-        value = read(url) if url else probe_discovery()
-    except Exception as e:
-        print('Google discovery unavailable:', type(e).__name__, str(e)[:200])
         value = probe_discovery()
+    except Exception as e:
+        if not url:
+            raise
+        print('Probe discovery unavailable; checking Google:', type(e).__name__)
+        value = read(url)
     discovered = value['origin']
     old = [] if not previous else [previous.get('origin')] + previous.get('alternatives', [])
     # Prefer the last working Russian mirror; still discover new alternatives each run.
@@ -134,6 +138,7 @@ def resolve(url, previous=None, verify_ru=False):
         for origin in candidates:
             try:
                 report = russian_check(origin)
+                print('Russian checks:', origin, [(p.get('network'), p.get('http_status'), p.get('ok')) for p in report['probes']])
                 checks.append({'origin': origin, **report})
                 if report['ok']:
                     value['origin'] = origin
