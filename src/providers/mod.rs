@@ -1,6 +1,7 @@
 pub mod connections;
 mod external;
 pub mod lastfm;
+pub mod wave;
 pub mod yandex;
 
 use crate::model::{match_score, Artist, Edition, Provider, Track};
@@ -21,6 +22,54 @@ pub struct Services {
 #[cfg(test)]
 mod live {
     use super::*;
+    #[test]
+    #[ignore = "Downloads a real matching recording to the local offline cache, without audio playback"]
+    fn live_hitmo_priority_and_persistent_download() {
+        let mut services =
+            Services::new(crate::store::secret("yandex"), String::new(), String::new());
+        if let Ok(store) = crate::store::Store::open() {
+            services.hitmo_base = store.settings().hitmo_base;
+        }
+        let original = services
+            .yandex_search("Kambulat Пьяная симпатия")
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        let recording = services.playback_recording(&original).unwrap();
+        assert_eq!(
+            recording.provider,
+            Provider::Hitmotop,
+            "Expected a matching Hitmo recording"
+        );
+        assert!(match_score(&original, &recording) >= 0.94);
+        crate::audio::download_offline(
+            &original,
+            &services,
+            std::sync::Arc::new(std::sync::atomic::AtomicU64::new(1)),
+        )
+        .unwrap();
+        let cache = crate::cache::global();
+        let bytes = cache
+            .read(&original)
+            .expect("Downloaded original identity is preserved");
+        let entry = cache
+            .entries()
+            .into_iter()
+            .find(|e| e.track.key() == original.key())
+            .unwrap();
+        assert!(entry.pinned);
+        assert_eq!(entry.source, Provider::Hitmotop);
+        assert!(bytes.len() > 100000);
+        assert!(rodio::Decoder::new(std::io::Cursor::new(bytes.clone()))
+            .unwrap()
+            .next()
+            .is_some());
+        println!(
+            "Hitmo recording matched and decoded: {} bytes; original Yandex ID preserved",
+            bytes.len()
+        );
+    }
     #[test]
     fn fast_search_batches_are_published_while_another_source_is_still_waiting() {
         let (release, wait) = std::sync::mpsc::channel();
@@ -394,6 +443,65 @@ pub fn id(v: &Value) -> String {
 }
 
 impl Services {
+    /// Preserve the library identity; choosing an audio source must not change likes or radio feedback IDs.
+    pub fn playback_recording(&self, original: &Track) -> Result<Track> {
+        if original.provider == Provider::Hitmotop || original.edition == Edition::ConfirmedOriginal
+        {
+            return Ok(original.clone());
+        }
+        type Matches = std::collections::VecDeque<(String, std::time::Instant, Track)>;
+        static MATCHES: std::sync::OnceLock<std::sync::Mutex<Matches>> = std::sync::OnceLock::new();
+        let matches = MATCHES.get_or_init(Default::default);
+        let key = format!(
+            "{}:{}:{}",
+            self.hitmo_base,
+            original.key(),
+            original.duration
+        );
+        if let Some((_, _, track)) = matches
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .find(|(k, at, _)| k == &key && at.elapsed() < Duration::from_secs(600))
+        {
+            return Ok(track.clone());
+        }
+        let mut lookup = self.clone();
+        lookup.http = Client::builder()
+            .connect_timeout(Duration::from_secs(3))
+            .timeout(Duration::from_secs(6))
+            .user_agent("WeDex audio matching")
+            .build()?;
+        if let Ok(tracks) = lookup.hitmotop_search(&original.query()) {
+            if let Some(t) = tracks
+                .into_iter()
+                .filter(|t| match_score(original, t) >= 0.94)
+                .max_by(|a, b| {
+                    let score = |t: &Track| {
+                        match_score(original, t)
+                            + match t.edition {
+                                Edition::Explicit | Edition::ConfirmedOriginal => 0.02,
+                                Edition::Clean => -0.12,
+                                _ => 0.,
+                            }
+                    };
+                    score(a).total_cmp(&score(b))
+                })
+            {
+                let mut matches = matches.lock().unwrap_or_else(|e| e.into_inner());
+                matches.push_back((key, std::time::Instant::now(), t.clone()));
+                while matches.len() > 256 {
+                    matches.pop_front();
+                }
+                return Ok(t);
+            }
+        }
+        if original.provider == Provider::LastFm {
+            self.resolve_recommendation(original, true)
+        } else {
+            Ok(original.clone())
+        }
+    }
     pub fn new(yandex: String, lastfm: String, soundcloud: String) -> Self {
         let http = Client::builder()
             .connect_timeout(Duration::from_secs(8))
@@ -541,24 +649,21 @@ impl Services {
                 })
         };
         let mut attempts = Vec::new();
-        if !self.yandex.is_empty() {
-            match self.yandex_search(&seed.query()) {
-                Ok(tracks) => {
-                    let count = tracks.len();
-                    if let Some(t) = choose(tracks) {
-                        return Ok(t);
-                    }
-                    attempts.push(format!("Яндекс: {count} записей, точного совпадения нет"));
-                }
-                Err(e) => attempts.push(format!("Яндекс: {e:#}")),
+        for provider in [
+            Provider::Hitmotop,
+            Provider::Yandex,
+            Provider::SoundCloud,
+            Provider::YouTube,
+        ] {
+            if provider == Provider::Yandex && self.yandex.is_empty() {
+                continue;
             }
-        }
-        for provider in [Provider::Hitmotop, Provider::SoundCloud, Provider::YouTube] {
             if provider == Provider::SoundCloud && self.soundcloud.is_empty() {
                 continue;
             }
             let result = match provider {
                 Provider::Hitmotop => self.hitmotop_search(&seed.query()),
+                Provider::Yandex => self.yandex_search(&seed.query()),
                 Provider::SoundCloud => self.soundcloud_search(&seed.query()),
                 _ => self.youtube_search(&seed.query()),
             };

@@ -103,7 +103,14 @@ pub(super) fn like_button(track: &Track, m: &Model, x: f32, y: f32, size: f32) -
 pub(super) fn panel(ui: &GlassUi, title: &str, w: f32, h: f32) -> (Node, Node) {
     let size = ui.layout.size;
     let w = w.min(size.x - 2. * ui.layout.margin);
-    let h = h.min(size.y - 2. * ui.layout.margin);
+    let h = h.min(
+        size.y
+            - if ui.layout.mobile {
+                40. + ui.layout.margin
+            } else {
+                2. * ui.layout.margin
+            },
+    );
     let mut root = frame("Runtime panel", 0., 0., size.x, size.y);
     let mut scrim = frame("Click outside to close", 0., 0., size.x, size.y);
     scrim.fills = vec![fill([0., 0., 0.], 0.2)];
@@ -114,7 +121,14 @@ pub(super) fn panel(ui: &GlassUi, title: &str, w: f32, h: f32) -> (Node, Node) {
     p.command = Some(Control::Noop);
     p.width = w;
     p.height = h;
-    p.move_to((size.x - w) / 2., (size.y - h) / 2.);
+    p.move_to(
+        (size.x - w) / 2.,
+        if ui.layout.mobile {
+            (size.y - h - ui.layout.margin).max(40.)
+        } else {
+            (size.y - h) / 2.
+        },
+    );
     p.children.push(text(title, 28., 22., w - 100., 24., true));
     p.children
         .push(icon_button("x", w - 56., 16., 40., Control::Close, false));
@@ -155,7 +169,7 @@ fn section(p: &mut Node, value: &str, y: f32) {
 }
 pub(super) fn settings(ui: &mut GlassUi, m: &Model) -> Node {
     let (mut root, mut p) = panel(ui, "Настройки", 720., 760.);
-    let mut viewport = body(ui, &p, 884.);
+    let mut viewport = body(ui, &p, 944.);
     let b = &mut viewport.children[0];
     let w = b.width;
     section(b, "Аккаунт и сервисы", 0.);
@@ -320,7 +334,7 @@ pub(super) fn settings(ui: &mut GlassUi, m: &Model) -> Node {
     b.children.push(text(
         &format!("WeDex · версия {}", env!("CARGO_PKG_VERSION")),
         4.,
-        836.,
+        906.,
         w,
         12.,
         false,
@@ -351,6 +365,15 @@ pub(super) fn settings(ui: &mut GlassUi, m: &Model) -> Node {
         w,
         44.,
         Control::Overlay(Overlay::Updates),
+        false,
+    ));
+    b.children.push(button(
+        "Скачанное и офлайн-режим",
+        0.,
+        814.,
+        w,
+        44.,
+        Control::Overlay(Overlay::Storage),
         false,
     ));
     p.children.push(viewport);

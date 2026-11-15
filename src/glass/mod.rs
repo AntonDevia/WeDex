@@ -14,6 +14,7 @@ mod render;
 mod scene;
 mod search;
 mod sonora;
+mod storage;
 mod theme;
 mod transitions;
 mod updates;
@@ -47,6 +48,8 @@ pub enum Page {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Overlay {
+    TrackActions,
+    Storage,
     Updates,
     #[cfg(windows)]
     Vps,
@@ -65,6 +68,12 @@ pub enum Overlay {
 }
 #[derive(Clone)]
 pub enum Intent {
+    Download(Vec<Track>),
+    RemoveDownload(Option<Track>),
+    CancelDownloads,
+    CacheAuto(bool),
+    CacheLimit(u32),
+    OfflineOnly(bool),
     Update(crate::updates::Action),
     Cloud(crate::cloud::Action),
     Artist(model::Artist),
@@ -107,6 +116,14 @@ pub enum Intent {
 }
 #[derive(Clone)]
 pub(super) enum Control {
+    Versions(Track),
+    OfflinePlay(usize),
+    Download(Vec<Track>),
+    RemoveDownload(Option<Track>),
+    CancelDownloads,
+    CacheAuto,
+    CacheLimit(u32),
+    OfflineOnly,
     Update(crate::updates::Action),
     #[cfg(windows)]
     VpsStart(bool),
@@ -168,6 +185,7 @@ pub(super) enum Control {
 }
 
 pub struct Model {
+    pub downloads: crate::cache::View,
     pub updates: crate::updates::View,
     pub player_liked: Option<bool>,
     pub sonora_ready: bool,
@@ -201,6 +219,8 @@ pub struct Model {
 }
 
 pub struct GlassUi {
+    gesture_translation: transitions::Tween,
+    action_track: Option<Track>,
     touch_start: Option<(egui::Pos2, f64)>,
     touch_delta: f32,
     touch_long: bool,
@@ -217,8 +237,6 @@ pub struct GlassUi {
     lyrics_motion: transitions::Tween,
     lyrics_emphasis: HashMap<usize, transitions::Tween>,
     zen_controls: transitions::Tween,
-    lyrics_visibility: transitions::Tween,
-    last_lyrics: Option<Node>,
     volume_visibility: transitions::Tween,
     last_overlay: Option<Node>,
     closing_overlay: Option<Node>,
@@ -287,6 +305,8 @@ impl GlassUi {
         let nodes: Vec<Node> =
             serde_json::from_value(data["roots"].clone()).expect("Figma scene schema");
         Self {
+            gesture_translation: transitions::Tween::new(0.),
+            action_track: None,
             touch_start: None,
             touch_delta: 0.,
             touch_long: false,
@@ -303,8 +323,6 @@ impl GlassUi {
             lyrics_motion: Default::default(),
             lyrics_emphasis: HashMap::new(),
             zen_controls: transitions::Tween::new(0.),
-            lyrics_visibility: transitions::Tween::new(0.),
-            last_lyrics: None,
             volume_visibility: transitions::Tween::new(0.),
             last_overlay: None,
             closing_overlay: None,
@@ -366,6 +384,11 @@ impl GlassUi {
             _ => Page::Sonora,
         };
         self.overlay = match name {
+            "downloads" => Some(Overlay::Storage),
+            "track-actions" => {
+                self.action_track = demo_tracks().into_iter().next();
+                Some(Overlay::TrackActions)
+            }
             "updates" => Some(Overlay::Updates),
             #[cfg(windows)]
             "vps" => Some(Overlay::Vps),
@@ -1272,6 +1295,12 @@ impl GlassUi {
         if overlay == Overlay::Artists {
             return Some(search::artists_panel(self, m));
         }
+        if overlay == Overlay::Storage {
+            return Some(storage::panel(self, m));
+        }
+        if overlay == Overlay::TrackActions {
+            return Some(storage::track_actions(self, m));
+        }
         if overlay == Overlay::Settings {
             return Some(panels::settings(self, m));
         }
@@ -1279,6 +1308,8 @@ impl GlassUi {
             return Some(panels::equalizer(self, m));
         }
         let id = match overlay {
+            Overlay::TrackActions => unreachable!(),
+            Overlay::Storage => unreachable!(),
             Overlay::Updates => unreachable!(),
             #[cfg(windows)]
             Overlay::Vps => unreachable!(),
@@ -1317,6 +1348,8 @@ impl GlassUi {
         Self::command(&mut root, "Glass dialog", Control::Noop);
         Self::command(&mut root, "button/x", Control::Close);
         match overlay {
+            Overlay::TrackActions => unreachable!(),
+            Overlay::Storage => unreachable!(),
             Overlay::Updates => unreachable!(),
             #[cfg(windows)]
             Overlay::Vps => unreachable!(),
@@ -1668,6 +1701,28 @@ impl GlassUi {
         size: egui::Vec2,
     ) {
         match control {
+            Control::OfflinePlay(index) => {
+                self.overlay = None;
+                out.push(Intent::PlayCollection(
+                    m.downloads
+                        .entries
+                        .iter()
+                        .map(|e| e.track.clone())
+                        .collect(),
+                    index,
+                ));
+            }
+            Control::Download(tracks) => {
+                out.push(Intent::Download(tracks));
+                if self.overlay == Some(Overlay::TrackActions) {
+                    self.overlay = None;
+                }
+            }
+            Control::RemoveDownload(track) => out.push(Intent::RemoveDownload(track)),
+            Control::CancelDownloads => out.push(Intent::CancelDownloads),
+            Control::CacheAuto => out.push(Intent::CacheAuto(!m.settings.cache_auto)),
+            Control::CacheLimit(mb) => out.push(Intent::CacheLimit(mb)),
+            Control::OfflineOnly => out.push(Intent::OfflineOnly(!m.settings.offline_only)),
             Control::Update(action) => out.push(Intent::Update(action)),
             #[cfg(windows)]
             Control::VpsAuth(key) => self.vps_editor.key = key,
@@ -1809,7 +1864,15 @@ impl GlassUi {
             }
             Control::CrossfadeOff => out.push(Intent::Crossfade(0.)),
             Control::CloseToTray(value) => out.push(Intent::CloseToTray(value)),
-            Control::ToggleLyrics => out.push(Intent::Lyrics(!m.settings.lyrics_enabled)),
+            Control::ToggleLyrics => {
+                let enabled = !self.zen || !m.settings.lyrics_enabled;
+                if !self.zen {
+                    self.zen = true;
+                    self.page_from = None;
+                    out.push(Intent::Zen(true));
+                }
+                out.push(Intent::Lyrics(enabled));
+            }
             Control::LyricSeek(time) => out.push(Intent::Seek(time)),
             Control::VerticalVolume => {
                 out.push(Intent::Volume((1. - local.y / size.y).clamp(0., 1.)))
@@ -1828,8 +1891,16 @@ impl GlassUi {
                 self.overlay = None;
             }
             Control::Like(track) => out.push(Intent::Like(track)),
-            Control::Radio(track) => out.push(Intent::Radio(track)),
+            Control::Radio(track) => {
+                if self.overlay == Some(Overlay::TrackActions) {
+                    self.overlay = None;
+                }
+                out.push(Intent::Radio(track));
+            }
             Control::Play(track) => {
+                if self.overlay == Some(Overlay::TrackActions) {
+                    self.overlay = None;
+                }
                 let collection = match self.page {
                     Page::Favorites => Some(&m.favorites),
                     Page::Playlist => Some(&m.playlist_tracks),
@@ -1842,13 +1913,18 @@ impl GlassUi {
                         .map(|index| (tracks, index))
                 }) {
                     out.push(Intent::PlayCollection(tracks.clone(), index));
-                } else if self.page == Page::Search {
+                } else if self.page == Page::Search && !m.settings.offline_only {
                     out.push(Intent::Radio(track));
                 } else {
                     out.push(Intent::Play(track));
                 }
             }
             Control::Row(track) => {
+                self.action_track = Some(track);
+                self.offsets.remove("dialog-scroll");
+                self.overlay = Some(Overlay::TrackActions);
+            }
+            Control::Versions(track) => {
                 self.overlay = Some(Overlay::Versions);
                 self.selected_version = None;
                 out.push(Intent::Versions(track));
@@ -2154,6 +2230,23 @@ impl GlassUi {
         } else {
             self.layout.root(&mut root, self.page, scroll)
         };
+        if !self.zen
+            && matches!(
+                self.page,
+                Page::Library | Page::Favorites | Page::Playlists | Page::Playlist
+            )
+        {
+            let mut downloads = panels::icon_button(
+                "download",
+                self.layout.size.x - self.layout.margin - 180.,
+                48.,
+                44.,
+                Control::Overlay(Overlay::Storage),
+                m.settings.offline_only,
+            );
+            downloads.name = "Open downloads".into();
+            root.children.push(downloads);
+        }
         if !self.zen && !self.layout.mobile {
             if let Some(art) = root.find_mut("Current artwork") {
                 let bounds = Rect::from_min_size(
@@ -2185,6 +2278,40 @@ impl GlassUi {
             }
         }
         theme::apply(&mut root, self.dark);
+        if self.layout.mobile {
+            let target = self
+                .touch_start
+                .and_then(|(start, _)| {
+                    let name = if self.zen {
+                        "Zen artwork"
+                    } else {
+                        "Floating player"
+                    };
+                    self.renderer
+                        .regions
+                        .get(name)
+                        .filter(|(bounds, clip)| bounds.intersect(*clip).contains(start))?;
+                    let current = ctx.input(|i| {
+                        i.pointer
+                            .interact_pos()
+                            .filter(|_| i.pointer.primary_down())
+                    })?;
+                    let delta = current - start;
+                    (delta.x.abs() > delta.y.abs() * 1.3 && self.drag.is_none())
+                        .then_some(delta.x.clamp(-180., 180.) * 0.18)
+                })
+                .unwrap_or(0.);
+            let dx = self
+                .gesture_translation
+                .value(target, now, self.reduced_motion);
+            if let Some(n) = root.find_mut(if self.zen {
+                "Zen artwork"
+            } else {
+                "Floating player"
+            }) {
+                n.move_to(n.x + dx, n.y);
+            }
+        }
         self.buttons.apply(
             &mut root,
             ctx.input(|i| i.pointer.hover_pos()),
@@ -2249,10 +2376,16 @@ impl GlassUi {
         if !self.reduced_motion && !m.preview {
             if let Some(root) = &mut overlay {
                 if self.overlay_started >= 0. {
-                    root.opacity = motion::ease_out(
+                    let progress = motion::ease_out(
                         ((now - self.overlay_started) / transitions::DURATION).clamp(0., 1.) as f32,
-                    )
-                    .max(0.0001);
+                    );
+                    root.opacity = progress.max(0.0001);
+                    if let Some(panel) = root.find_mut("Glass dialog") {
+                        panel.move_to(
+                            panel.x,
+                            panel.y + (1. - progress) * if self.layout.mobile { 24. } else { 8. },
+                        );
+                    }
                 }
             }
         }
@@ -2287,82 +2420,45 @@ impl GlassUi {
                 }
                 self.renderer
                     .paint(ui.painter(), &root, transform, 1., true, overlay.is_none());
-                if overlay.is_none() {
-                    if !self.zen {
-                        let opacity = self.lyrics_visibility.value(
-                            if m.settings.lyrics_enabled { 1. } else { 0. },
-                            now,
-                            self.reduced_motion,
-                        );
-                        if m.settings.lyrics_enabled {
-                            let mut lyrics = panels::lyrics(self, ctx, m, false);
-                            theme::apply(&mut lyrics, self.dark);
-                            self.buttons.apply(
-                                &mut lyrics,
-                                ctx.input(|i| i.pointer.hover_pos()),
-                                ctx.input(|i| i.pointer.primary_down()),
+                if overlay.is_none() && !self.zen {
+                    if let Some(dock) = root.find("Floating player") {
+                        if let Some(speaker) = dock.find("Mute") {
+                            let anchor = Rect::from_min_size(
+                                pos2(dock.x + speaker.x, dock.y + speaker.y),
+                                vec2(speaker.width, speaker.height),
+                            );
+                            let popup = panels::volume(self, m, anchor);
+                            let p = &popup.children[0];
+                            let bounds =
+                                Rect::from_min_size(pos2(p.x, p.y), vec2(p.width, p.height))
+                                    .union(anchor)
+                                    .expand(8.);
+                            if ctx.input(|i| {
+                                i.pointer.hover_pos().is_some_and(|p| {
+                                    anchor.expand(4.).contains(p)
+                                        || (now < self.volume_until && bounds.contains(p))
+                                })
+                            }) || matches!(self.drag, Some((Control::VerticalVolume, _, _)))
+                            {
+                                self.volume_until = now + 0.25;
+                            }
+                            let opacity = self.volume_visibility.value(
+                                if now < self.volume_until { 1. } else { 0. },
                                 now,
                                 self.reduced_motion,
-                                self.dark,
                             );
-                            self.last_lyrics = Some(lyrics);
-                        }
-                        if opacity > 0.001 {
-                            if let Some(mut lyrics) = self.last_lyrics.clone() {
-                                lyrics.opacity = opacity;
+                            if opacity > 0.001 {
+                                let mut popup = popup;
+                                theme::apply(&mut popup, self.dark);
+                                popup.opacity = opacity;
                                 self.renderer.paint(
                                     ui.painter(),
-                                    &lyrics,
+                                    &popup,
                                     transform,
                                     1.,
                                     true,
-                                    m.settings.lyrics_enabled,
+                                    true,
                                 );
-                            }
-                        }
-                    } else {
-                        self.lyrics_visibility = transitions::Tween::new(0.);
-                    }
-                    if !self.zen {
-                        if let Some(dock) = root.find("Floating player") {
-                            if let Some(speaker) = dock.find("Mute") {
-                                let anchor = Rect::from_min_size(
-                                    pos2(dock.x + speaker.x, dock.y + speaker.y),
-                                    vec2(speaker.width, speaker.height),
-                                );
-                                let popup = panels::volume(self, m, anchor);
-                                let p = &popup.children[0];
-                                let bounds =
-                                    Rect::from_min_size(pos2(p.x, p.y), vec2(p.width, p.height))
-                                        .union(anchor)
-                                        .expand(8.);
-                                if ctx.input(|i| {
-                                    i.pointer.hover_pos().is_some_and(|p| {
-                                        anchor.expand(4.).contains(p)
-                                            || (now < self.volume_until && bounds.contains(p))
-                                    })
-                                }) || matches!(self.drag, Some((Control::VerticalVolume, _, _)))
-                                {
-                                    self.volume_until = now + 0.25;
-                                }
-                                let opacity = self.volume_visibility.value(
-                                    if now < self.volume_until { 1. } else { 0. },
-                                    now,
-                                    self.reduced_motion,
-                                );
-                                if opacity > 0.001 {
-                                    let mut popup = popup;
-                                    theme::apply(&mut popup, self.dark);
-                                    popup.opacity = opacity;
-                                    self.renderer.paint(
-                                        ui.painter(),
-                                        &popup,
-                                        transform,
-                                        1.,
-                                        true,
-                                        true,
-                                    );
-                                }
                             }
                         }
                     }
@@ -2460,8 +2556,8 @@ impl GlassUi {
                     }
                 }
                 if ctx.input(|i| i.pointer.primary_released())
-                    && self.page == Page::Sonora
-                    && !self.zen
+                    && self.drag.is_none()
+                    && !self.touch_long
                 {
                     let dx = current.x - start.x;
                     let dy = current.y - start.y;
@@ -2470,12 +2566,34 @@ impl GlassUi {
                         .regions
                         .get("Cover flow · swipe")
                         .is_some_and(|(bounds, clip)| bounds.intersect(*clip).contains(start));
-                    if over_cover && dx.abs() > 45. && dx.abs() > dy.abs() * 1.3 {
+                    let over_mini = self
+                        .renderer
+                        .regions
+                        .get("Floating player")
+                        .is_some_and(|(b, c)| b.intersect(*c).contains(start));
+                    let over_zen = self
+                        .renderer
+                        .regions
+                        .get("Zen artwork")
+                        .is_some_and(|(b, c)| b.intersect(*c).contains(start));
+                    if (over_cover || over_mini || over_zen)
+                        && dx.abs() > 45.
+                        && dx.abs() > dy.abs() * 1.3
+                    {
                         out.push(if dx < 0. {
                             Intent::Next
                         } else {
                             Intent::Previous
                         });
+                        self.touch_long = true;
+                    } else if dy.abs() > 64.
+                        && dy.abs() > dx.abs() * 1.4
+                        && ((over_mini && dy < 0.) || (over_zen && dy > 0.))
+                    {
+                        let zen = dy < 0.;
+                        self.zen = zen;
+                        self.page_from = None;
+                        out.push(Intent::Zen(zen));
                         self.touch_long = true;
                     }
                 }

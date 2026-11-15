@@ -1,8 +1,8 @@
 [package]
 name = "wedex"
-version = "0.8.5"
+version = "0.9.0"
 edition = "2021"
-description = "Sonora — a native music client with Last.fm discovery"
+description = "Sonora — a native music client with Yandex Wave, Hitmo audio and offline playback"
 license = "MIT"
 
 [workspace]
@@ -42,6 +42,7 @@ unicode-normalization = "0.1"
 url = "2"
 uuid = { version = "1", features = ["v4"] }
 webbrowser = "1"
+time = { version = "0.3", features = ["formatting"] }
 
 [target.'cfg(windows)'.dependencies]
 wedex-provision = { path = "crates/wedex-provision" }

@@ -70,6 +70,36 @@ pub(super) fn prepare(
     generation: Arc<AtomicU64>,
     ticket: u64,
 ) -> Ready {
+    prepare_cached(
+        track,
+        services,
+        generation,
+        ticket,
+        &crate::cache::global(),
+        crate::cache::offline(),
+    )
+}
+fn prepare_cached(
+    track: &Track,
+    services: &Services,
+    generation: Arc<AtomicU64>,
+    ticket: u64,
+    cache: &crate::cache::Disk,
+    offline: bool,
+) -> Ready {
+    if let Some(bytes) = cache.read(track) {
+        let input = Progressive::cached(bytes, generation.clone(), ticket);
+        let buffer = input.shared.clone();
+        if let Ok(decoder) = Decoder::new(input) {
+            return Ok((decoder, buffer));
+        }
+    }
+    if offline {
+        return Err("Трек ещё не скачан на это устройство".into());
+    }
+    let recording = services
+        .playback_recording(track)
+        .map_err(|e| e.to_string())?;
     let mut last = String::new();
     for attempt in 0..3 {
         if generation.load(Ordering::Relaxed) != ticket {
@@ -79,19 +109,35 @@ pub(super) fn prepare(
             std::thread::sleep(Duration::from_millis(150 * attempt));
         }
         let result = (|| -> Result<_> {
+            let recording = if attempt == 2 && track.provider != Provider::LastFm {
+                track
+            } else {
+                &recording
+            };
             // Signed stream URLs are obtained again on retry, rather than reusing
             // a stale URL after a 403 response.
-            let url = services.resolve(track).context("Получение адреса аудио")?;
+            let url = services
+                .resolve(recording)
+                .context("Получение адреса аудио")?;
             if generation.load(Ordering::Relaxed) != ticket {
                 bail!("Загрузка отменена");
             }
-            let token = if track.provider == Provider::SoundCloud {
+            let token = if recording.provider == Provider::SoundCloud {
                 services.soundcloud.clone()
             } else {
                 String::new()
             };
-            let input = Progressive::open(&services.http, &url, token, generation.clone(), ticket)
-                .context("Открытие аудиопотока")?;
+            let cache_track =
+                crate::cache::automatic().then(|| (track.clone(), recording.provider));
+            let input = Progressive::open_cached(
+                &services.http,
+                &url,
+                token,
+                generation.clone(),
+                ticket,
+                cache_track,
+            )
+            .context("Открытие аудиопотока")?;
             let buffer = input.shared.clone();
             Ok((Decoder::new(input).context("Декодирование аудио")?, buffer))
         })();
@@ -113,6 +159,67 @@ pub(super) fn prepare(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn offline_reopen_decodes_and_seeks_without_resolving_any_catalog() {
+        let path =
+            std::env::temp_dir().join(format!("wedex-offline-test-{}", uuid::Uuid::new_v4()));
+        let cache = crate::cache::Disk {
+            root: path.clone(),
+            limit: 100_000,
+        };
+        let original = crate::model::tests::track("Offline song", "Artist", 1);
+        let samples = 8000_u32;
+        let mut wav = Vec::new();
+        wav.extend(b"RIFF");
+        wav.extend((36 + samples * 2).to_le_bytes());
+        wav.extend(b"WAVEfmt ");
+        wav.extend(16_u32.to_le_bytes());
+        wav.extend(1_u16.to_le_bytes());
+        wav.extend(1_u16.to_le_bytes());
+        wav.extend(8000_u32.to_le_bytes());
+        wav.extend(16000_u32.to_le_bytes());
+        wav.extend(2_u16.to_le_bytes());
+        wav.extend(16_u16.to_le_bytes());
+        wav.extend(b"data");
+        wav.extend((samples * 2).to_le_bytes());
+        for _ in 0..samples {
+            wav.extend(1000_i16.to_le_bytes());
+        }
+        cache
+            .save(&original, Provider::Hitmotop, &wav, true)
+            .unwrap();
+        let services = Services::new(String::new(), String::new(), String::new());
+        let (mut decoded, buffer) = prepare_cached(
+            &original,
+            &services,
+            Arc::new(AtomicU64::new(3)),
+            3,
+            &cache,
+            true,
+        )
+        .unwrap();
+        assert!(buffer.0.lock().unwrap().done);
+        assert_eq!(decoded.sample_rate(), 8000);
+        assert!(decoded.next().is_some());
+        decoded.try_seek(Duration::from_millis(500)).unwrap();
+        assert_eq!(decoded.count(), 4000);
+        let missing = crate::model::tests::track("Not saved", "Artist", 1);
+        assert!(prepare_cached(
+            &missing,
+            &services,
+            Arc::new(AtomicU64::new(3)),
+            3,
+            &cache,
+            true
+        )
+        .err()
+        .unwrap()
+        .contains("не скачан"));
+        assert_eq!(cache.entries()[0].track.key(), original.key());
+        assert_eq!(cache.entries()[0].source, Provider::Hitmotop);
+        cache.remove(&original).unwrap();
+        std::fs::remove_dir(path).unwrap();
+    }
     #[test]
     #[ignore = "Downloads and decodes a real track using the configured Yandex account"]
     fn live_yandex_preload_decodes_audio_before_playback() {

@@ -1,6 +1,7 @@
 // Generated from the measured Figma scene and current asset library.
 pub fn bytes(name: &str) -> Option<&'static [u8]> {
     Some(match name {
+        "download" => include_bytes!("../../assets/ui/download.png"),
         "arrow-up-right" => include_bytes!("../../assets/ui/arrow-up-right.png"),
         "audio-lines" => include_bytes!("../../assets/ui/audio-lines.png"),
         "check" => include_bytes!("../../assets/ui/check.png"),

@@ -2,6 +2,98 @@ use super::*;
 use egui::{Event, Modifiers, PointerButton, RawInput};
 
 #[test]
+fn lyrics_are_only_in_zen_and_player_toggle_opens_it() {
+    let mut m = fixture();
+    m.settings.lyrics_enabled = true;
+    m.lyrics = Some(crate::lyrics::Lyrics {
+        lines: crate::lyrics::parse_lrc("[00:00.00]One\n[00:20.00]Two"),
+        ..Default::default()
+    });
+    let mut h = Harness::new();
+    h.frame(&m, vec![]);
+    assert!(!h.ui.renderer.regions.contains_key("Lyrics content"));
+    let toggle = h.point(|c| matches!(c, Control::ToggleLyrics), 0.5);
+    let actions = h.click(&m, toggle);
+    assert!(h.ui.zen);
+    assert!(actions.iter().any(|a| matches!(a, Intent::Zen(true))));
+    assert!(actions.iter().any(|a| matches!(a, Intent::Lyrics(true))));
+    h.frame(&m, vec![]);
+    assert!(h.ui.renderer.regions.contains_key("Lyrics content"));
+}
+
+#[test]
+fn phone_player_swipes_open_skip_and_close_without_triggering_seek() {
+    let _mobile = crate::platform::mobile_for_test();
+    let m = fixture();
+    let mut h = Harness::new();
+    h.size = vec2(411., 838.);
+    h.frame(&m, vec![]);
+    fn swipe(h: &mut Harness, m: &Model, start: egui::Pos2, end: egui::Pos2) -> Vec<Intent> {
+        h.frame(
+            m,
+            vec![
+                Event::PointerMoved(start),
+                Event::PointerButton {
+                    pos: start,
+                    button: PointerButton::Primary,
+                    pressed: true,
+                    modifiers: Modifiers::NONE,
+                },
+            ],
+        );
+        h.frame(m, vec![Event::PointerMoved(end)]);
+        h.frame(
+            m,
+            vec![Event::PointerButton {
+                pos: end,
+                button: PointerButton::Primary,
+                pressed: false,
+                modifiers: Modifiers::NONE,
+            }],
+        )
+    }
+    let dock = h.ui.renderer.regions["Floating player"].0;
+    let start = pos2(dock.min.x + 100., dock.center().y);
+    let actions = swipe(&mut h, &m, start, start + vec2(0., -100.));
+    assert!(actions.iter().any(|a| matches!(a, Intent::Zen(true))));
+    h.frame(&m, vec![]);
+    let art = h.ui.renderer.regions["Zen artwork"].0;
+    let actions = swipe(&mut h, &m, art.center(), art.center() + vec2(-90., 0.));
+    assert_eq!(
+        actions.iter().filter(|a| matches!(a, Intent::Next)).count(),
+        1
+    );
+    assert!(!actions.iter().any(|a| matches!(a, Intent::Seek(_))));
+    h.frame(&m, vec![]);
+    let art = h.ui.renderer.regions["Zen artwork"].0;
+    let actions = swipe(&mut h, &m, art.center(), art.center() + vec2(0., 110.));
+    assert!(actions.iter().any(|a| matches!(a, Intent::Zen(false))));
+    assert!(!h.ui.zen);
+}
+
+#[test]
+fn track_actions_download_without_starting_a_version_search() {
+    let m = fixture();
+    let mut h = Harness::new();
+    h.frame(&m, vec![]);
+    let mut out = vec![];
+    h.ui.process(
+        Control::Row(m.favorites[0].clone()),
+        &m,
+        &mut out,
+        pos2(0., 0.),
+        vec2(0., 0.),
+    );
+    assert!(out.is_empty());
+    assert_eq!(h.ui.overlay, Some(Overlay::TrackActions));
+    h.frame(&m, vec![]);
+    let point = h.point(|c| matches!(c, Control::Download(_)), 0.5);
+    let actions = h.click(&m, point);
+    assert!(actions.iter().any(|a|matches!(a,Intent::Download(tracks) if tracks.len()==1 && tracks[0].key()==m.favorites[0].key())));
+    assert!(h.ui.overlay.is_none());
+}
+
+#[test]
 fn synchronized_connections_preserve_the_open_player_panel() {
     let mut h = Harness::new();
     h.ui.overlay = Some(Overlay::Eq);
@@ -255,6 +347,7 @@ fn cloud_panel_fields_keep_focus_and_start_button_uses_selected_network_mode() {
 fn fixture() -> Model {
     let tracks = demo_tracks();
     Model {
+        downloads: crate::cache::View::default(),
         player_liked: None,
         updates: Default::default(),
         sonora_ready: true,
@@ -473,7 +566,7 @@ fn zen_hover_and_lyric_tracking_animate_for_two_hundred_milliseconds() {
 
 #[test]
 fn wheel_browses_synced_lyrics_uniformly_then_resumes_the_current_line_after_three_seconds() {
-    for zen in [false, true] {
+    for zen in [true] {
         let mut m = fixture();
         m.settings.lyrics_enabled = true;
         m.status.position = 100.;
@@ -516,12 +609,7 @@ fn wheel_browses_synced_lyrics_uniformly_then_resumes_the_current_line_after_thr
         );
         let until = h.ui.lyrics_manual_until;
         assert_eq!(h.ui.lyrics_manual_index, Some(26));
-        let root = if zen {
-            h.ui.last_root.as_ref()
-        } else {
-            h.ui.last_lyrics.as_ref()
-        }
-        .unwrap();
+        let root = h.ui.last_root.as_ref().unwrap();
         let content = root.find("Lyrics content").unwrap();
         let selected = content
             .children
@@ -537,12 +625,7 @@ fn wheel_browses_synced_lyrics_uniformly_then_resumes_the_current_line_after_thr
         for _ in 0..10 {
             h.frame(&m, vec![]);
         }
-        let root = if zen {
-            h.ui.last_root.as_ref()
-        } else {
-            h.ui.last_lyrics.as_ref()
-        }
-        .unwrap();
+        let root = h.ui.last_root.as_ref().unwrap();
         let lines = &root.find("Lyrics content").unwrap().children;
         assert!(!lines.is_empty());
         assert!(lines.iter().all(
@@ -567,12 +650,7 @@ fn wheel_browses_synced_lyrics_uniformly_then_resumes_the_current_line_after_thr
         for _ in 0..4 {
             h.frame(&m, vec![]);
         }
-        let root = if zen {
-            h.ui.last_root.as_ref()
-        } else {
-            h.ui.last_lyrics.as_ref()
-        }
-        .unwrap();
+        let root = h.ui.last_root.as_ref().unwrap();
         let active = root
             .find("Lyrics content")
             .unwrap()
@@ -603,7 +681,7 @@ fn wheel_browses_synced_lyrics_uniformly_then_resumes_the_current_line_after_thr
 
 #[test]
 fn lyric_row_scroll_handles_wrapped_lines_precision_wheels_and_both_boundaries() {
-    for zen in [false, true] {
+    for zen in [true] {
         let mut m = fixture();
         m.settings.lyrics_enabled = true;
         m.status.position = 0.;
@@ -646,12 +724,7 @@ fn lyric_row_scroll_handles_wrapped_lines_precision_wheels_and_both_boundaries()
                 Some(if index == 3 { 1 } else { 0 })
             );
         }
-        let root = if zen {
-            h.ui.last_root.as_ref()
-        } else {
-            h.ui.last_lyrics.as_ref()
-        }
-        .unwrap();
+        let root = h.ui.last_root.as_ref().unwrap();
         let content = root.find("Lyrics content").unwrap();
         let wrapped = content
             .children

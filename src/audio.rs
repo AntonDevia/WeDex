@@ -195,6 +195,68 @@ impl Drop for Player {
 }
 
 const MAX_BUFFER: usize = 128 * 1024 * 1024;
+pub fn download_offline(track: &Track, services: &Services, cancel: Arc<AtomicU64>) -> Result<()> {
+    let cache = crate::cache::global();
+    if cache.read(track).is_some() {
+        return cache.pin(track);
+    }
+    let recording = services.playback_recording(track)?;
+    let mut candidates = vec![recording];
+    if candidates[0].key() != track.key() && track.provider != Provider::LastFm {
+        candidates.push(track.clone());
+    }
+    let mut error = String::new();
+    for recording in candidates {
+        if cancel.load(Ordering::Relaxed) != 1 {
+            bail!("Скачивание отменено");
+        }
+        match download_bytes(&recording, services, cancel.clone()) {
+            Ok(bytes) => {
+                cache.save(track, recording.provider, &bytes, true)?;
+                cache.save_cover(track, &services.http);
+                return Ok(());
+            }
+            Err(e) => {
+                error = e.to_string();
+            }
+        }
+    }
+    bail!("Не удалось скачать запись: {error}")
+}
+fn download_bytes(
+    recording: &Track,
+    services: &Services,
+    cancel: Arc<AtomicU64>,
+) -> Result<Vec<u8>> {
+    let url = services.resolve(recording)?;
+    let token = if recording.provider == Provider::SoundCloud {
+        services.soundcloud.clone()
+    } else {
+        String::new()
+    };
+    let input = Progressive::open(&services.http, &url, token, cancel.clone(), 1)?;
+    let buffer = input.shared.clone();
+    let _decoder = Decoder::new(input).context("Проверка аудиозаписи")?;
+    let mut data = buffer.0.lock().unwrap();
+    while !data.done {
+        if cancel.load(Ordering::Relaxed) != 1 {
+            bail!("Скачивание отменено");
+        }
+        data = buffer
+            .1
+            .wait_timeout(data, Duration::from_millis(100))
+            .unwrap()
+            .0;
+    }
+    if let Some(error) = &data.error {
+        bail!("{error}");
+    }
+    if cancel.load(Ordering::Relaxed) != 1 {
+        bail!("Скачивание отменено");
+    }
+    Ok(data.bytes.clone())
+}
+
 struct Buffer {
     bytes: Vec<u8>,
     done: bool,
@@ -209,12 +271,39 @@ struct Progressive {
     ticket: u64,
 }
 impl Progressive {
+    fn cached(bytes: Vec<u8>, generation: Arc<AtomicU64>, ticket: u64) -> Self {
+        let length = bytes.len() as u64;
+        Self {
+            shared: Arc::new((
+                Mutex::new(Buffer {
+                    bytes,
+                    done: true,
+                    error: None,
+                }),
+                Condvar::new(),
+            )),
+            pos: 0,
+            length: Some(length),
+            generation,
+            ticket,
+        }
+    }
     fn open(
         http: &reqwest::blocking::Client,
         url: &str,
         token: String,
         generation: Arc<AtomicU64>,
         ticket: u64,
+    ) -> Result<Self> {
+        Self::open_cached(http, url, token, generation, ticket, None)
+    }
+    fn open_cached(
+        http: &reqwest::blocking::Client,
+        url: &str,
+        token: String,
+        generation: Arc<AtomicU64>,
+        ticket: u64,
+        cache_track: Option<(Track, Provider)>,
     ) -> Result<Self> {
         let res = response(audio_request(http, url, &token).send())?;
         let is_hls = res
@@ -271,7 +360,24 @@ impl Progressive {
                     buffer.error = Some("Аудиопоток оборвался до конца записи".into());
                 }
             }
+            let save = if buffer.error.is_none() && !buffer.bytes.is_empty() {
+                cache_track.map(|track| (track, buffer.bytes.clone()))
+            } else {
+                None
+            };
             worker.1.notify_all();
+            drop(buffer);
+            if let Some(((track, provider), bytes)) = save {
+                if let Err(e) = crate::cache::global().save(&track, provider, &bytes, false) {
+                    let _ = crate::diagnostics::append(
+                        &crate::diagnostics::log_path(),
+                        "audio-cache",
+                        &e.to_string(),
+                        &[],
+                    );
+                }
+                crate::cache::global().save_cover(&track, &http);
+            }
         });
         Ok(Self {
             shared,
@@ -288,7 +394,7 @@ fn audio_request(
     url: &str,
     token: &str,
 ) -> reqwest::blocking::RequestBuilder {
-    let request = http.get(url).timeout(Duration::from_secs(180));
+    let request = http.get(url).timeout(Duration::from_secs(45));
     if !token.is_empty()
         && url::Url::parse(url)
             .ok()

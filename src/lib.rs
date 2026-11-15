@@ -1,6 +1,8 @@
 mod app;
 mod audio;
 mod branding;
+mod cache;
+mod cache_manager;
 mod cloud;
 mod diagnostics;
 mod discovery;
@@ -15,6 +17,7 @@ mod recognition;
 mod store;
 mod tray;
 mod updates;
+mod wave_feedback;
 
 #[cfg(not(target_os = "android"))]
 pub fn run_desktop() -> eframe::Result<()> {

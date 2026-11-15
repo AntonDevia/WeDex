@@ -33,6 +33,8 @@ impl Hit {
 }
 #[derive(Default)]
 pub struct Renderer {
+    checked_covers: HashSet<String>,
+    image_order: std::collections::VecDeque<String>,
     textures: HashMap<String, TextureHandle>,
     pub hits: Vec<Hit>,
     pub regions: HashMap<String, (Rect, Rect)>,
@@ -266,6 +268,41 @@ impl Renderer {
     }
     fn texture(&mut self, ctx: &egui::Context, source: &str) -> Option<(TextureId, egui::Vec2)> {
         if source.starts_with("https://") || source.starts_with("http://") {
+            if let Some(i) = self.image_order.iter().position(|s| s == source) {
+                self.image_order.remove(i);
+            }
+            self.image_order.push_back(source.into());
+            while self.image_order.len() > 64 {
+                if let Some(old) = self.image_order.pop_front() {
+                    ctx.forget_image(&old);
+                    self.textures.remove(&old);
+                    self.checked_covers.remove(&old);
+                }
+            }
+            if let Some(texture) = self.textures.get(source) {
+                return Some((texture.id(), texture.size_vec2()));
+            }
+            if self.checked_covers.insert(source.into()) {
+                if let Some(bytes) = crate::cache::global().cover(source) {
+                    if let Ok(image) = image::load_from_memory(&bytes) {
+                        let image = image.into_rgba8();
+                        let texture = ctx.load_texture(
+                            source,
+                            color_image(
+                                [image.width() as usize, image.height() as usize],
+                                image.as_raw(),
+                            ),
+                            TextureOptions::LINEAR,
+                        );
+                        let result = (texture.id(), texture.size_vec2());
+                        self.textures.insert(source.into(), texture);
+                        return Some(result);
+                    }
+                }
+            }
+            if crate::cache::offline() {
+                return None;
+            }
             return match ctx.try_load_texture(
                 source,
                 TextureOptions::LINEAR,

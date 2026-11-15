@@ -39,6 +39,7 @@ enum Event {
     Lyrics(String, Result<Option<crate::lyrics::Lyrics>, String>),
     Search(u64, SearchResult, bool),
     Recommendations(u64, Result<Vec<Track>, String>, bool),
+    Wave(u64, crate::providers::wave::Batch, bool),
     Resolved(u64, Result<Track, String>),
     Prefetched(String, Result<Track, String>),
     Library(u64, Result<(Vec<Track>, Vec<Playlist>, String), String>),
@@ -55,6 +56,10 @@ enum Action {
 }
 
 pub struct App {
+    settings_due: Option<Instant>,
+    wave: Option<crate::providers::wave::Session>,
+    wave_feedback: crate::wave_feedback::Feedback,
+    downloads: crate::cache_manager::Manager,
     updates: crate::updates::Updates,
     cloud: crate::cloud::Cloud,
     sonora_ready: bool,
@@ -157,6 +162,8 @@ impl App {
             }
         };
         let mut settings = store.as_ref().map(Store::settings).unwrap_or_default();
+        crate::cache::configure(settings.cache_auto, settings.cache_limit_mb);
+        crate::cache::set_offline(settings.offline_only);
         settings.eq = settings.eq.map(|gain| gain.clamp(-12., 12.));
         settings.eq_preamp = settings.eq_preamp.clamp(-12., 12.);
         settings.crossfade = settings.crossfade.clamp(0., 12.);
@@ -225,6 +232,10 @@ impl App {
             artists: Vec::new(),
             artist: None,
             artist_request: 0,
+            downloads: crate::cache_manager::Manager::new(preview.is_some()),
+            settings_due: None,
+            wave: None,
+            wave_feedback: crate::wave_feedback::Feedback::new(),
             lyrics: None,
             lyrics_key: None,
             lyrics_loading: false,
@@ -305,11 +316,17 @@ impl App {
         });
     }
     fn persist(&mut self) {
+        self.settings_due = None;
+        crate::cache::configure(self.settings.cache_auto, self.settings.cache_limit_mb);
+        crate::cache::set_offline(self.settings.offline_only);
         if let Some(store) = &self.store {
             if let Err(e) = store.save_settings(&self.settings) {
                 self.report_error("storage", e.to_string());
             }
         }
+    }
+    fn defer_settings(&mut self) {
+        self.settings_due = Some(Instant::now() + std::time::Duration::from_millis(350));
     }
     fn report_error(&mut self, context: &str, error: impl AsRef<str>) {
         let error = error.as_ref();
@@ -324,6 +341,21 @@ impl App {
     }
     fn search(&mut self) {
         if self.query.trim().is_empty() {
+            return;
+        }
+        if self.settings.offline_only {
+            let query = crate::model::normalize(&self.query);
+            self.results = self
+                .downloads
+                .view
+                .entries
+                .iter()
+                .map(|e| e.track.clone())
+                .filter(|t| crate::model::normalize(&t.query()).contains(&query))
+                .collect();
+            self.artists.clear();
+            self.searching = false;
+            self.message = "Поиск в скачанных треках".into();
             return;
         }
         self.search_id += 1;
@@ -462,6 +494,10 @@ impl App {
         if self.generating {
             return;
         }
+        if self.settings.offline_only {
+            self.message = "Офлайн-режим: музыка доступна в скачанных треках".into();
+            return;
+        }
         self.radio_id += 1;
         let id = self.radio_id;
         self.generating = true;
@@ -474,7 +510,25 @@ impl App {
             .iter()
             .cloned()
             .collect();
+        let session = self.wave.clone();
+        let wave_excluded = self.settings.recent_wave_ids.clone();
+        let seed = (!self.settings.last_title.is_empty())
+            .then(|| seeds.first().cloned())
+            .flatten();
         self.job(move |s| {
+            if !s.yandex.is_empty() {
+                match s.wave(session, seed.as_ref(), discovery, &wave_excluded) {
+                    Ok(batch) => return Event::Wave(id, batch, autoplay),
+                    Err(e) => {
+                        let _ = crate::diagnostics::append(
+                            &crate::diagnostics::log_path(),
+                            "wave-fallback",
+                            &e.to_string(),
+                            &[&s.yandex],
+                        );
+                    }
+                }
+            }
             Event::Recommendations(
                 id,
                 s.recommendations(&seeds, &excluded, discovery, &recent)
@@ -506,13 +560,15 @@ impl App {
             seeds = crate::discovery::Sampler::fresh()
                 .seeds(&self.favorites, &self.settings.recent_radio_seeds);
         }
-        if seeds.is_empty() {
+        if seeds.is_empty() && self.services.yandex.is_empty() {
             self.message =
                 "Введите исполнителя и трек для старта или импортируйте понравившиеся из Яндекса"
                     .into();
             return;
         }
         self.sonora_ready = false;
+        self.wave_feedback.finish();
+        self.wave = None;
         self.generating = false;
         self.radio_id += 1;
         self.playback_source = PlaybackSource::Sonora;
@@ -542,11 +598,11 @@ impl App {
         self.settings.last_title.clear();
         self.persist();
         self.tab = Tab::Sonora;
-        if self.favorites.is_empty() && self.loading_library {
+        if self.favorites.is_empty() && self.loading_library && self.services.yandex.is_empty() {
             self.start_after_library = true;
             return;
         }
-        if self.favorites.is_empty() {
+        if self.favorites.is_empty() && self.services.yandex.is_empty() {
             self.message = "Добавьте треки в понравившиеся, чтобы запустить Sonora".into();
             return;
         }
@@ -583,7 +639,13 @@ impl App {
                 track = replacement;
             }
         }
-        if track.provider == Provider::LastFm {
+        let cached = self
+            .downloads
+            .view
+            .entries
+            .iter()
+            .any(|e| e.track.key() == track.key());
+        if track.provider == Provider::LastFm && !self.settings.offline_only && !cached {
             self.player.stop();
             self.resolving = true;
             let id = self.play_id;
@@ -618,7 +680,16 @@ impl App {
                     track = t;
                 }
             }
-            if track.provider == Provider::LastFm && self.prefetch_requested.insert(track.key()) {
+            if !self.settings.offline_only
+                && !self
+                    .downloads
+                    .view
+                    .entries
+                    .iter()
+                    .any(|e| e.track.key() == track.key())
+                && track.provider == Provider::LastFm
+                && self.prefetch_requested.insert(track.key())
+            {
                 let key = track.key();
                 let original = self.settings.prefer_original;
                 self.job(move |s| {
@@ -644,7 +715,16 @@ impl App {
                     t
                 }
             })
-            .filter(|t| t.provider != Provider::LastFm);
+            .filter(|t| {
+                t.provider != Provider::LastFm
+                    || self.settings.offline_only
+                    || self
+                        .downloads
+                        .view
+                        .entries
+                        .iter()
+                        .any(|e| e.track.key() == t.key())
+            });
         let key = next.as_ref().map(Track::key);
         if key != self.next_audio_key {
             self.player.preload(next, self.services.clone());
@@ -653,6 +733,18 @@ impl App {
     }
     fn next(&mut self) {
         let next = self.cursor.map(|i| i + 1).unwrap_or(0);
+        if self.settings.offline_only {
+            if let Some(index) = (next..self.queue.len()).find(|i| {
+                self.downloads
+                    .view
+                    .entries
+                    .iter()
+                    .any(|e| e.track.key() == self.queue[*i].key())
+            }) {
+                self.start(index);
+            }
+            return;
+        }
         if next < self.queue.len() {
             self.start(next);
         } else if self.playback_source == PlaybackSource::Sonora {
@@ -680,6 +772,7 @@ impl App {
                 if let Some(store) = &self.store {
                     match store.favorite(&track, !exists) {
                         Ok(()) => {
+                            self.wave_feedback.like(&track.id, !exists);
                             if exists {
                                 self.favorites.retain(|t| t.key() != track.key());
                             } else {
@@ -691,6 +784,8 @@ impl App {
                 }
             }
             Action::Radio(track) => {
+                self.wave_feedback.finish();
+                self.wave = None;
                 self.start_after_library = false;
                 self.sonora_ready = true;
                 self.settings.last_artist = track.artist.clone();
@@ -735,6 +830,19 @@ impl App {
     fn poll(&mut self) {
         while let Ok(event) = self.rx.try_recv() {
             match event {
+                Event::Wave(id, batch, autoplay)
+                    if id == self.radio_id && self.playback_source == PlaybackSource::Sonora =>
+                {
+                    crate::discovery::remember(
+                        &mut self.settings.recent_wave_ids,
+                        batch.tracks.iter().map(|t| t.id.clone()),
+                        120,
+                    );
+                    self.wave = Some(batch.session);
+                    let _ = self
+                        .tx
+                        .send(Event::Recommendations(id, Ok(batch.tracks), autoplay));
+                }
                 Event::ConnectionChecked(provider, revision, value, result) => {
                     if self
                         .interface
@@ -848,7 +956,9 @@ impl App {
                                 self.sonora_ready = true;
                             }
                             if tracks.is_empty() {
-                                self.message="Last.fm пока не нашёл новых рекомендаций для этих треков. Попробуйте другой исходный трек".into();
+                                self.message =
+                                    "Пока нет новых рекомендаций. Попробуйте другой исходный трек"
+                                        .into();
                             }
                             crate::discovery::remember(
                                 &mut self.settings.recent_recommendations,
@@ -959,6 +1069,15 @@ impl App {
             }
         }
         let status = self.player.status();
+        self.wave_feedback.observe(
+            &status,
+            if self.playback_source == PlaybackSource::Sonora {
+                self.wave.as_ref()
+            } else {
+                None
+            },
+            &self.services,
+        );
         if status.playing && status.ticket != self.recorded_ticket {
             self.recorded_ticket = status.ticket;
             if let Some(track) = &status.track {
@@ -1251,6 +1370,7 @@ impl App {
             out
         };
         let mut model = Model {
+            downloads: self.downloads.view.clone(),
             player_liked: None,
             updates: self.updates.view.clone(),
             sonora_ready: self.sonora_ready,
@@ -1610,6 +1730,31 @@ impl App {
     }
     fn local_action(&mut self, action: Intent) {
         match action {
+            Intent::Download(tracks) => {
+                if self.settings.offline_only {
+                    self.message = "Для скачивания выключите офлайн-режим".into();
+                } else {
+                    self.downloads.download(tracks);
+                    self.message = "Добавлено в очередь загрузки".into();
+                }
+            }
+            Intent::RemoveDownload(track) => self.downloads.remove(track),
+            Intent::CancelDownloads => self.downloads.cancel(),
+            Intent::CacheAuto(auto) => {
+                self.settings.cache_auto = auto;
+                self.persist();
+            }
+            Intent::CacheLimit(mb) => {
+                self.settings.cache_limit_mb = mb.clamp(256, 16384);
+                self.persist();
+            }
+            Intent::OfflineOnly(offline) => {
+                self.settings.offline_only = offline;
+                if offline {
+                    self.downloads.cancel();
+                }
+                self.persist();
+            }
             Intent::Cloud(action) => self.cloud.action(action),
             Intent::Update(action) => {
                 #[cfg(windows)]
@@ -1660,7 +1805,7 @@ impl App {
                 self.settings.eq_preamp = value.clamp(-12., 12.);
                 self.settings.eq_preset = "Своя настройка".into();
                 *self.player.preamp.write().unwrap() = self.settings.eq_preamp;
-                self.persist();
+                self.defer_settings();
             }
             Intent::Preset(index) => {
                 if let Some(preset) = crate::equalizer::PRESETS.get(index) {
@@ -1674,7 +1819,7 @@ impl App {
             }
             Intent::Crossfade(seconds) => {
                 self.settings.crossfade = seconds.clamp(0., 12.);
-                self.persist();
+                self.defer_settings();
             }
             Intent::CloseToTray(value) => {
                 self.settings.close_to_tray = value;
@@ -1826,19 +1971,37 @@ impl App {
             Intent::Volume(value) => {
                 self.settings.volume = value;
                 self.player.volume(value);
-                self.persist();
+                self.defer_settings();
             }
             Intent::Eq(gains) => {
                 self.settings.eq_preset = "Своя настройка".into();
                 self.settings.eq = gains;
                 *self.player.eq.write().unwrap() = gains;
-                self.persist();
+                self.defer_settings();
             }
             Intent::Discovery(value) => {
                 self.settings.discovery = value;
                 self.persist();
                 if self.preview_status.is_none() {
-                    self.launch_radio();
+                    if self.playback_source == PlaybackSource::Sonora && self.cursor.is_some() {
+                        self.radio_id += 1;
+                        self.generating = false;
+                        self.wave = None;
+                        self.queue.truncate(self.cursor.unwrap() + 1);
+                        self.refill_cursor = None;
+                        self.prefetch_requested.clear();
+                        self.next_audio_key = None;
+                        self.player.preload(None, self.services.clone());
+                        let seeds = if self.settings.last_title.is_empty() {
+                            crate::discovery::Sampler::fresh()
+                                .seeds(&self.favorites, &self.settings.recent_radio_seeds)
+                        } else {
+                            self.queue.first().cloned().into_iter().collect()
+                        };
+                        self.fetch_radio(seeds, false);
+                    } else {
+                        self.launch_radio();
+                    }
                 }
             }
             Intent::Sync => {
@@ -1973,6 +2136,13 @@ fn should_crossfade(status: &audio::Status, settings: &Settings, handled: Option
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if self.settings_due.is_some_and(|at| Instant::now() >= at) {
+            self.persist();
+        }
+        self.downloads.tick(&self.services);
+        for error in std::mem::take(&mut self.downloads.errors) {
+            self.report_error("offline-cache", error);
+        }
         if cfg!(windows)
             && (self.preview_status.is_none() || std::env::var_os("WEDEX_PREVIEW_TRAY").is_some())
             && !self.tray_attempted

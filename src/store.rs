@@ -11,6 +11,9 @@ use std::path::PathBuf;
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
+    pub cache_auto: bool,
+    pub cache_limit_mb: u32,
+    pub offline_only: bool,
     pub hitmo_base: String,
     pub theme: ThemePreference,
     pub volume: f32,
@@ -28,10 +31,14 @@ pub struct Settings {
     pub recent_searches: Vec<Track>,
     pub recent_recommendations: Vec<String>,
     pub recent_radio_seeds: Vec<String>,
+    pub recent_wave_ids: Vec<String>,
 }
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            cache_auto: true,
+            cache_limit_mb: 2048,
+            offline_only: false,
             hitmo_base: crate::providers::connections::DEFAULT_HITMO.into(),
             theme: ThemePreference::System,
             volume: 0.65,
@@ -49,6 +56,7 @@ impl Default for Settings {
             recent_searches: Vec::new(),
             recent_recommendations: Vec::new(),
             recent_radio_seeds: Vec::new(),
+            recent_wave_ids: Vec::new(),
         }
     }
 }
