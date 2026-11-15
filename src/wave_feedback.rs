@@ -93,6 +93,7 @@ impl Feedback {
                 if p.playing
                     && status.playing
                     && !status.loading
+                    && !status.buffering
                     && elapsed < 2.
                     && advance >= 0.
                     && advance <= elapsed + 0.15
@@ -100,7 +101,7 @@ impl Feedback {
                     p.seconds += advance.min(elapsed);
                 }
                 p.position = status.position;
-                p.playing = status.playing && !status.loading;
+                p.playing = status.playing && !status.loading && !status.buffering;
                 p.ended = status.ended;
                 return;
             }
@@ -109,6 +110,7 @@ impl Feedback {
         let Some((s, t)) = session.zip(status.track.as_ref()).filter(|(s, t)| {
             status.playing
                 && !status.loading
+                && !status.buffering
                 && t.provider == Provider::Yandex
                 && s.batches.contains_key(&t.id)
         }) else {

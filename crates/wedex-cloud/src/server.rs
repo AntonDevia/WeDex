@@ -355,6 +355,17 @@ fn owner(hub: &Hub, headers: &HeaderMap) -> bool {
         .and_then(|h| h.strip_prefix("Bearer "))
         .is_some_and(|token| digest(token) == hub.owner_hash)
 }
+// Native peers are paired by the owner and already have access to the encrypted
+// account vault. This narrowly permits signed release updates, never SSH/admin operations.
+fn may_update(hub: &Hub, headers: &HeaderMap) -> bool {
+    owner(hub, headers)
+        || headers
+            .get(header::AUTHORIZATION)
+            .and_then(|h| h.to_str().ok())
+            .and_then(|h| h.strip_prefix("Bearer "))
+            .and_then(|token| hub.db.authenticate(token).ok().flatten())
+            .is_some_and(|d| d.can_play)
+}
 async fn pair(
     State(hub): State<Arc<Hub>>,
     Json(request): Json<PairRequest>,
@@ -494,7 +505,11 @@ async fn connection(mut socket: WebSocket, hub: Arc<Hub>) {
         &ServerMessage::Welcome {
             version: env!("CARGO_PKG_VERSION").into(),
             capabilities: if crate::update::enabled() {
-                vec!["connections-vault".into(), "server-update".into()]
+                vec![
+                    "connections-vault".into(),
+                    "server-update".into(),
+                    "device-server-update".into(),
+                ]
             } else {
                 vec!["connections-vault".into()]
             },
@@ -562,7 +577,7 @@ async fn request_update(
     State(hub): State<Arc<Hub>>,
     headers: HeaderMap,
 ) -> ApiResult<serde_json::Value> {
-    if !owner(&hub, &headers) {
+    if !may_update(&hub, &headers) {
         return Err(failure(StatusCode::UNAUTHORIZED, "Требуется владелец"));
     }
     if !crate::update::enabled() {
@@ -618,7 +633,7 @@ async fn update_status(
     State(hub): State<Arc<Hub>>,
     headers: HeaderMap,
 ) -> ApiResult<serde_json::Value> {
-    if !owner(&hub, &headers) {
+    if !may_update(&hub, &headers) {
         return Err(failure(StatusCode::UNAUTHORIZED, "Требуется владелец"));
     }
     let value = std::fs::read(hub.data_dir.join("update-status.json"))

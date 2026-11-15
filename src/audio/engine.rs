@@ -45,9 +45,13 @@ pub(super) fn run(
     let mut pending = vec![];
     let mut gain = ramp::control(1., 0.);
     let mut outgoing: Option<Outgoing> = None;
+    let mut last_position = 0_f32;
+    let mut advanced_at = Instant::now();
     loop {
         match rx.recv_timeout(Duration::from_millis(20)) {
             Ok(Command::Play(ticket, track, services, warm, fade)) => {
+                last_position = 0.;
+                advanced_at = Instant::now();
                 desired_playing = true;
                 for token in pending.drain(..) {
                     cancel(Some(token));
@@ -283,6 +287,13 @@ pub(super) fn run(
             }
             let mut state = shared.lock().unwrap();
             state.position = sink.get_pos().as_secs_f32();
+            if state.position > last_position + 0.01 || !desired_playing {
+                advanced_at = Instant::now();
+                last_position = state.position;
+            }
+            state.buffering = desired_playing
+                && advanced_at.elapsed() > Duration::from_millis(250)
+                && download.as_ref().is_some_and(|b| !b.0.lock().unwrap().done);
             state.playing = !sink.is_paused() && !sink.empty();
             if sink.empty() {
                 state.ended = true;

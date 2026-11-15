@@ -2,6 +2,155 @@ use super::*;
 use egui::{Event, Modifiers, PointerButton, RawInput};
 
 #[test]
+fn a_quick_android_tap_survives_pointer_gone_in_the_same_frame() {
+    let _mobile = crate::platform::mobile_for_test();
+    let m = fixture();
+    let mut h = Harness::new();
+    h.size = vec2(411., 838.);
+    h.frame(&m, vec![]);
+    let p = h.point(|c| matches!(c, Control::Navigate(Page::Search)), 0.5);
+    let actions = h.frame(
+        &m,
+        vec![
+            Event::PointerMoved(p),
+            Event::PointerButton {
+                pos: p,
+                button: PointerButton::Primary,
+                pressed: true,
+                modifiers: Modifiers::NONE,
+            },
+            Event::PointerButton {
+                pos: p,
+                button: PointerButton::Primary,
+                pressed: false,
+                modifiers: Modifiers::NONE,
+            },
+            Event::PointerGone,
+        ],
+    );
+    assert!(actions
+        .iter()
+        .any(|a| matches!(a, Intent::Navigate(Page::Search))));
+    assert_eq!(h.ui.page, Page::Search);
+}
+
+#[test]
+fn long_mobile_release_notes_wrap_scroll_and_leave_install_visible() {
+    let _mobile = crate::platform::mobile_for_test();
+    let mut m = fixture();
+    m.updates.app = Some(wedex_update::Release {
+        version: "99.0.0".into(),
+        notes: (0..45)
+            .map(|i| {
+                format!("- Изменение {i}: подробное описание улучшений плеера и работы приложения.")
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+        page: String::new(),
+        url: String::new(),
+        sha256: String::new(),
+        size: 1,
+        target: wedex_update::Target::Android,
+    });
+    let mut h = Harness::new();
+    h.size = vec2(360., 740.);
+    h.ui.overlay = Some(Overlay::Updates);
+    h.frame(&m, vec![]);
+    let dialog = h.ui.last_overlay.as_ref().unwrap();
+    let notes = dialog.find("Release notes").unwrap();
+    assert!(notes.height > 1000.);
+    assert!(h.ui.dialog_scroll_max > 1000.);
+    let install = h.point(
+        |c| matches!(c, Control::Update(crate::updates::Action::Download)),
+        0.5,
+    );
+    assert!(h.ctx.screen_rect().contains(install));
+    let (rect, clip) = h.ui.renderer.regions["Dialog content"];
+    let p = rect.intersect(clip).center();
+    h.frame(
+        &m,
+        vec![
+            Event::PointerMoved(p),
+            Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: vec2(0., -300.),
+                modifiers: Modifiers::NONE,
+            },
+        ],
+    );
+    assert!(h.ui.offsets["dialog-scroll"] > 0.);
+    assert_eq!(
+        install,
+        h.point(
+            |c| matches!(c, Control::Update(crate::updates::Action::Download)),
+            0.5
+        )
+    );
+}
+
+#[test]
+fn buffering_is_shown_on_player_and_offline_has_a_visual_badge() {
+    let mut m = fixture();
+    m.status.buffering = true;
+    let mut h = Harness::new();
+    h.frame(&m, vec![]);
+    assert!(!h
+        .ui
+        .renderer
+        .regions
+        .contains_key("Player progress indicator"));
+    for _ in 0..3 {
+        h.frame(&m, vec![]);
+    }
+    assert!(h
+        .ui
+        .renderer
+        .regions
+        .contains_key("Player progress indicator"));
+    m.status.buffering = false;
+    m.network = crate::network::State::Offline;
+    for _ in 0..4 {
+        h.frame(&m, vec![]);
+    }
+    assert!(!h
+        .ui
+        .renderer
+        .regions
+        .contains_key("Player progress indicator"));
+    assert!(h.ui.renderer.regions.contains_key("Connection badge"));
+}
+
+#[test]
+fn mobile_cover_keeps_outgoing_art_during_a_track_change() {
+    let _mobile = crate::platform::mobile_for_test();
+    let mut m = fixture();
+    let mut h = Harness::new();
+    h.size = vec2(411., 838.);
+    h.ui.zen = true;
+    h.frame(&m, vec![]);
+    h.ui.reduced_motion = false;
+    m.status.track = Some(m.queue[1].clone());
+    h.frame(&m, vec![]);
+    assert!(h
+        .ui
+        .last_root
+        .as_ref()
+        .unwrap()
+        .find("Outgoing artwork")
+        .is_some());
+    for _ in 0..4 {
+        h.frame(&m, vec![]);
+    }
+    assert!(h
+        .ui
+        .last_root
+        .as_ref()
+        .unwrap()
+        .find("Outgoing artwork")
+        .is_none());
+}
+
+#[test]
 fn lyrics_are_only_in_zen_and_player_toggle_opens_it() {
     let mut m = fixture();
     m.settings.lyrics_enabled = true;
@@ -347,6 +496,7 @@ fn cloud_panel_fields_keep_focus_and_start_button_uses_selected_network_mode() {
 fn fixture() -> Model {
     let tracks = demo_tracks();
     Model {
+        network: crate::network::State::Online,
         downloads: crate::cache::View::default(),
         player_liked: None,
         updates: Default::default(),
@@ -366,7 +516,7 @@ fn fixture() -> Model {
             position: 48.,
             ..Default::default()
         },
-        queue: tracks.clone(),
+        queue: tracks.clone().into(),
         cursor: Some(0),
         favorites: tracks.clone(),
         results: vec![],
@@ -988,7 +1138,7 @@ fn reset_button_is_actionable_in_both_wide_and_compact_sonora() {
 fn sonora_starts_with_one_actionable_card_and_waits_for_a_real_radio_batch() {
     let mut m = fixture();
     m.sonora_ready = false;
-    m.queue.clear();
+    m.queue = Default::default();
     m.cursor = None;
     m.status = Status::default();
     for size in [vec2(1440., 960.), vec2(480., 800.), vec2(360., 480.)] {
@@ -1015,7 +1165,7 @@ fn sonora_starts_with_one_actionable_card_and_waits_for_a_real_radio_batch() {
         assert!(!actions.iter().any(|i| matches!(i, Intent::ResetRadio)));
         m.sonora_loading = false;
         m.sonora_ready = true;
-        m.queue = demo_tracks();
+        m.queue = demo_tracks().into();
         h.frame(&m, vec![]);
         assert!(h
             .ui
@@ -1028,7 +1178,7 @@ fn sonora_starts_with_one_actionable_card_and_waits_for_a_real_radio_batch() {
             .iter()
             .all(|n| n.name != "Album/sonora-start"));
         m.sonora_ready = false;
-        m.queue.clear();
+        m.queue = Default::default();
     }
 }
 
@@ -1118,7 +1268,7 @@ fn upcoming_cover_starts_loading_before_its_card_becomes_visible() {
     });
     let mut m = fixture();
     m.preview = false;
-    m.queue[4].cover = Some(format!("http://{addr}/future.png"));
+    std::sync::Arc::make_mut(&mut m.queue)[4].cover = Some(format!("http://{addr}/future.png"));
     let mut h = Harness::new();
     h.frame(&m, vec![]);
     assert!(!h

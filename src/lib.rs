@@ -11,6 +11,7 @@ mod fingerprinting;
 mod glass;
 mod lyrics;
 mod model;
+mod network;
 mod platform;
 mod providers;
 mod recognition;

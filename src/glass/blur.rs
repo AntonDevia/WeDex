@@ -141,14 +141,36 @@ impl Gaussian {
             }
             self.size = [width, height];
         }
+        let pixels = info.pixels_per_point;
+        let bounds = t
+            .bounds(size.x, size.y)
+            .expand(blur * t.scale() * 2. + 2.)
+            .intersect(info.clip_rect.expand(blur * 2.));
+        let left = (bounds.left() * pixels).floor().max(0.) as i32;
+        let right = (bounds.right() * pixels).ceil().min(width as f32) as i32;
+        let bottom = (height as f32 - bounds.bottom() * pixels).floor().max(0.) as i32;
+        let top = (height as f32 - bounds.top() * pixels)
+            .ceil()
+            .min(height as f32) as i32;
+        if right <= left || top <= bottom {
+            return;
+        }
         gl.bind_texture(glow::TEXTURE_2D, Some(self.source));
-        gl.copy_tex_sub_image_2d(glow::TEXTURE_2D, 0, 0, 0, 0, 0, width, height);
+        gl.copy_tex_sub_image_2d(
+            glow::TEXTURE_2D,
+            0,
+            left,
+            bottom,
+            left,
+            bottom,
+            right - left,
+            top - bottom,
+        );
         gl.bind_vertex_array(Some(self.vao));
         gl.use_program(Some(self.program));
         let uniform = |name| gl.get_uniform_location(self.program, name);
         gl.uniform_1_i32(uniform("u_source").as_ref(), 0);
         gl.uniform_2_f32(uniform("u_screen").as_ref(), width as f32, height as f32);
-        let pixels = info.pixels_per_point;
         gl.uniform_2_f32(uniform("u_size").as_ref(), size.x, size.y);
         gl.uniform_1_f32(uniform("u_radius").as_ref(), radius);
         gl.uniform_1_f32(uniform("u_alpha").as_ref(), alpha);
@@ -177,6 +199,13 @@ impl Gaussian {
             0,
         );
         gl.viewport(0, 0, down[0], down[1]);
+        gl.enable(glow::SCISSOR_TEST);
+        gl.scissor(
+            left / 4,
+            bottom / 4,
+            ((right + 3) / 4 - left / 4).min(down[0] - left / 4),
+            ((top + 3) / 4 - bottom / 4).min(down[1] - bottom / 4),
+        );
         gl.uniform_1_i32(uniform("u_pass").as_ref(), 0);
         gl.uniform_2_f32(uniform("u_target").as_ref(), down[0] as f32, down[1] as f32);
         // The target is quarter resolution; express sigma in its pixel coordinates.

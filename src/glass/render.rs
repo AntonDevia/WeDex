@@ -33,6 +33,8 @@ impl Hit {
 }
 #[derive(Default)]
 pub struct Renderer {
+    pending_images: HashSet<String>,
+    cover_cache: Option<super::cover_cache::Cache>,
     checked_covers: HashSet<String>,
     image_order: std::collections::VecDeque<String>,
     textures: HashMap<String, TextureHandle>,
@@ -190,6 +192,16 @@ impl Renderer {
         ctx: &egui::Context,
         tracks: impl Iterator<Item = &'a crate::model::Track>,
     ) {
+        if let Some(cache) = &self.cover_cache {
+            while let Ok((source, image)) = cache.rx.try_recv() {
+                if self.checked_covers.contains(&source) {
+                    self.textures.insert(
+                        source.clone(),
+                        ctx.load_texture(source, image, TextureOptions::LINEAR),
+                    );
+                }
+            }
+        }
         for track in tracks {
             if let Some(source) = &track.cover {
                 let _ = self.texture(ctx, source);
@@ -283,24 +295,14 @@ impl Renderer {
                 return Some((texture.id(), texture.size_vec2()));
             }
             if self.checked_covers.insert(source.into()) {
-                if let Some(bytes) = crate::cache::global().cover(source) {
-                    if let Ok(image) = image::load_from_memory(&bytes) {
-                        let image = image.into_rgba8();
-                        let texture = ctx.load_texture(
-                            source,
-                            color_image(
-                                [image.width() as usize, image.height() as usize],
-                                image.as_raw(),
-                            ),
-                            TextureOptions::LINEAR,
-                        );
-                        let result = (texture.id(), texture.size_vec2());
-                        self.textures.insert(source.into(), texture);
-                        return Some(result);
-                    }
+                let cache = self.cover_cache.get_or_insert_with(Default::default);
+                if cache.tx.try_send((source.into(), ctx.clone())).is_err() {
+                    self.checked_covers.remove(source);
                 }
             }
-            if crate::cache::offline() {
+            if crate::cache::offline() || crate::network::state() == crate::network::State::Offline
+            {
+                self.pending_images.remove(source);
                 return None;
             }
             return match ctx.try_load_texture(
@@ -308,8 +310,18 @@ impl Renderer {
                 TextureOptions::LINEAR,
                 egui::load::SizeHint::Size(600, 600),
             ) {
-                Ok(egui::load::TexturePoll::Ready { texture }) => Some((texture.id, texture.size)),
-                _ => None,
+                Ok(egui::load::TexturePoll::Ready { texture }) => {
+                    self.pending_images.remove(source);
+                    Some((texture.id, texture.size))
+                }
+                Ok(egui::load::TexturePoll::Pending { .. }) => {
+                    self.pending_images.insert(source.into());
+                    None
+                }
+                Err(_) => {
+                    self.pending_images.remove(source);
+                    None
+                }
             };
         }
         if !self.textures.contains_key(source) {
@@ -454,7 +466,12 @@ impl Renderer {
         if !n.visible || n.opacity <= 0. {
             return;
         }
-        let isolated = n.opacity < 0.999 && !n.children.is_empty() && !n.name.starts_with("Album/");
+        // Mobile GPUs pay a full framebuffer copy for every isolated group.
+        // Direct premultiplied opacity keeps touch transitions within the frame budget.
+        let isolated = !crate::platform::mobile()
+            && n.opacity < 0.999
+            && !n.children.is_empty()
+            && !n.name.starts_with("Album/");
         if isolated {
             self.groups.capture(p, self.group_depth, None);
             self.group_depth += 1;
@@ -627,14 +644,14 @@ impl Renderer {
             };
             let mut job = egui::text::LayoutJob::single_section(n.characters.clone(), format);
             job.wrap.max_width = n.width * scale + 8.;
-            job.wrap.max_rows = if n.name == "Lyric line" {
+            job.wrap.max_rows = if matches!(n.name.as_str(), "Lyric line" | "Release notes") {
                 (n.height / line_height).round().max(1.) as usize
             } else if n.characters.contains('\n') {
                 3
             } else {
                 1
             };
-            job.wrap.break_anywhere = n.name != "Lyric line";
+            job.wrap.break_anywhere = !matches!(n.name.as_str(), "Lyric line" | "Release notes");
             let centered_lyrics = n.name == "Lyric line" && n.text_align_horizontal == "CENTER";
             if centered_lyrics {
                 job.halign = egui::Align::Center;
@@ -702,9 +719,19 @@ impl Renderer {
                         Color32::WHITE.gamma_multiply(a),
                     );
                 } else {
+                    let pulse = if self.pending_images.contains(source) {
+                        (p.ctx().input(|i| i.time) * 4.).sin() as f32 * 5.
+                    } else {
+                        0.
+                    };
                     p.add(Shape::convex_polygon(
                         points(t, n.width, n.height, n.corner_radius, false),
-                        Color32::from_rgb(40, 38, 43).gamma_multiply(a),
+                        Color32::from_rgb(
+                            (40. + pulse) as u8,
+                            (38. + pulse) as u8,
+                            (43. + pulse) as u8,
+                        )
+                        .gamma_multiply(a),
                         Stroke::NONE,
                     ));
                 }

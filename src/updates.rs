@@ -18,7 +18,6 @@ pub enum Action {
     Check,
     Download,
     Apply,
-    #[cfg(windows)]
     Server,
 }
 enum Event {
@@ -66,14 +65,7 @@ impl Updates {
         };
         for (target, current) in [
             (target, env!("CARGO_PKG_VERSION").to_owned()),
-            (
-                Target::Server,
-                if cfg!(windows) {
-                    server.to_owned()
-                } else {
-                    String::new()
-                },
-            ),
+            (Target::Server, server.to_owned()),
         ] {
             if current.is_empty() {
                 continue;

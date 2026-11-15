@@ -27,7 +27,11 @@ impl Listening {
         store: Option<&Store>,
         now: Instant,
     ) -> anyhow::Result<()> {
-        let running = status.playing && !status.loading && !status.ended && status.error.is_none();
+        let running = status.playing
+            && !status.loading
+            && !status.buffering
+            && !status.ended
+            && status.error.is_none();
         if self.ticket != status.ticket {
             self.flush(store)?;
             self.ticket = status.ticket;

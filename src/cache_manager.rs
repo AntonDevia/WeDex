@@ -117,7 +117,7 @@ impl Manager {
                 }
             }
         }
-        if self.active.is_none() {
+        if self.active.is_none() && crate::network::state() != crate::network::State::Offline {
             if let Some(track) = self.queue.pop_front() {
                 self.dirty = true;
                 let tx = self.tx.clone();

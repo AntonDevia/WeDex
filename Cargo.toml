@@ -1,6 +1,6 @@
 [package]
 name = "wedex"
-version = "0.9.0"
+version = "0.10.0"
 edition = "2021"
 description = "Sonora — a native music client with Yandex Wave, Hitmo audio and offline playback"
 license = "MIT"

@@ -21,6 +21,16 @@ public final class WeDexActivity extends GameActivity {
     public static native void nativeText(long generation, String text, int start, int end);
     public static native void nativeSubmit();
     public static native void nativeInvitation(String value);
+    public static native void nativeConnectivity(int value);
+    private android.net.ConnectivityManager connectivity;
+    private android.net.ConnectivityManager.NetworkCallback networkCallback;
+    private volatile android.net.Network observedNetwork;
+    private void reportNetwork() {
+        android.net.Network network=connectivity.getActiveNetwork();
+        observedNetwork=network;
+        android.net.NetworkCapabilities caps=network==null?null:connectivity.getNetworkCapabilities(network);
+        nativeConnectivity(caps==null?0:caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED)?2:1);
+    }
     private long editGeneration;
     private boolean settingText;
     private SecretStore secrets;
@@ -30,6 +40,23 @@ public final class WeDexActivity extends GameActivity {
     @Override protected void onCreate(Bundle state) {
         secrets = new SecretStore(this);
         super.onCreate(state);
+        connectivity=(android.net.ConnectivityManager)getSystemService(CONNECTIVITY_SERVICE);
+        networkCallback=new android.net.ConnectivityManager.NetworkCallback() {
+            @Override public void onAvailable(android.net.Network network) {
+                observedNetwork=network;
+                nativeConnectivity(1);
+            }
+            @Override public void onLost(android.net.Network network) {
+                if(network.equals(observedNetwork)) { observedNetwork=null; nativeConnectivity(0); }
+            }
+            @Override public void onCapabilitiesChanged(android.net.Network network,android.net.NetworkCapabilities caps) {
+                // Callback capabilities are authoritative; synchronous queries here can return stale state.
+                observedNetwork=network;
+                nativeConnectivity(caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED)?2:1);
+            }
+        };
+        connectivity.registerDefaultNetworkCallback(networkCallback);
+        reportNetwork();
         setVolumeControlStream(android.media.AudioManager.STREAM_MUSIC);
         if (android.os.Build.VERSION.SDK_INT >= 33) getOnBackInvokedDispatcher().registerOnBackInvokedCallback(0, () -> nativeCommand(10, 0));
         nativeTheme((getResources().getConfiguration().uiMode & 48) == 32 ? 1 : 0);
@@ -47,6 +74,7 @@ public final class WeDexActivity extends GameActivity {
         nativeTheme((config.uiMode & 48) == 32 ? 1 : 0);
     }
     @Override protected void onDestroy() {
+        if (networkCallback!=null) {connectivity.unregisterNetworkCallback(networkCallback);networkCallback=null;}
         if (isFinishing()) { nativeCommand(6, 0); stopService(new Intent(this, PlaybackService.class)); }
         super.onDestroy();
     }

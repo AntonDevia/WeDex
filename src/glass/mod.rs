@@ -5,8 +5,11 @@ mod blur;
 mod cloud;
 mod composite;
 mod connections;
+mod cover_cache;
+mod feedback;
 mod layout;
 mod lyrics_view;
+mod mobile_motion;
 mod mobile_player;
 mod motion;
 mod panels;
@@ -16,6 +19,7 @@ mod search;
 mod sonora;
 mod storage;
 mod theme;
+mod touch;
 mod transitions;
 mod updates;
 #[cfg(windows)]
@@ -30,6 +34,26 @@ use crate::{
 use eframe::egui::{self, pos2, vec2, Color32, FontFamily, FontId, Rect};
 use scene::{Node, Transform};
 use std::collections::HashMap;
+
+fn pointer_position(ctx: &egui::Context) -> Option<egui::Pos2> {
+    ctx.input(|i| {
+        i.pointer.interact_pos().or_else(|| {
+            i.pointer
+                .primary_released()
+                .then(|| {
+                    i.events.iter().rev().find_map(|event| match event {
+                        egui::Event::PointerButton {
+                            pos,
+                            button: egui::PointerButton::Primary,
+                            ..
+                        } => Some(*pos),
+                        _ => None,
+                    })
+                })
+                .flatten()
+        })
+    })
+}
 
 struct ListViewport {
     rect: Rect,
@@ -185,6 +209,7 @@ pub(super) enum Control {
 }
 
 pub struct Model {
+    pub network: crate::network::State,
     pub downloads: crate::cache::View,
     pub updates: crate::updates::View,
     pub player_liked: Option<bool>,
@@ -195,7 +220,7 @@ pub struct Model {
     pub error_generation: u64,
     pub settings: Settings,
     pub status: Status,
-    pub queue: Vec<Track>,
+    pub queue: std::sync::Arc<Vec<Track>>,
     pub cursor: Option<usize>,
     pub favorites: Vec<Track>,
     pub results: Vec<Track>,
@@ -219,6 +244,15 @@ pub struct Model {
 }
 
 pub struct GlassUi {
+    mobile_cover: mobile_motion::Cover,
+    touch: touch::Touch,
+    touch_frame: f64,
+    zen_motion: transitions::Tween,
+    art_drag: transitions::Tween,
+    zen_drag: transitions::Tween,
+    zen_background: Option<Node>,
+    zen_target: bool,
+    feedback: feedback::Feedback,
     gesture_translation: transitions::Tween,
     action_track: Option<Track>,
     touch_start: Option<(egui::Pos2, f64)>,
@@ -305,6 +339,15 @@ impl GlassUi {
         let nodes: Vec<Node> =
             serde_json::from_value(data["roots"].clone()).expect("Figma scene schema");
         Self {
+            mobile_cover: mobile_motion::Cover::default(),
+            touch: touch::Touch::default(),
+            touch_frame: 0.,
+            zen_motion: transitions::Tween::new(0.),
+            art_drag: transitions::Tween::new(0.),
+            zen_drag: transitions::Tween::new(0.),
+            zen_background: None,
+            zen_target: false,
+            feedback: feedback::Feedback::default(),
             gesture_translation: transitions::Tween::new(0.),
             action_track: None,
             touch_start: None,
@@ -1277,7 +1320,7 @@ impl GlassUi {
     fn compose_overlay(&mut self, ctx: &egui::Context, m: &Model) -> Option<Node> {
         let overlay = self.overlay?;
         if overlay == Overlay::Updates {
-            return Some(updates::panel(self, m));
+            return Some(updates::panel(self, ctx, m));
         }
         #[cfg(windows)]
         if overlay == Overlay::Vps {
@@ -1803,7 +1846,10 @@ impl GlassUi {
                 self.overlay = None;
             }
             Control::PlayPause => {
-                if let Some(index) = m.cursor.filter(|_| m.status.ended) {
+                if let Some(index) = m
+                    .cursor
+                    .filter(|_| m.status.ended || m.status.error.is_some())
+                {
                     out.push(Intent::QueueIndex(index));
                 } else if m.status.track.is_some() {
                     out.push(Intent::Pause);
@@ -1813,8 +1859,14 @@ impl GlassUi {
                     out.push(Intent::Play(t.clone()));
                 }
             }
-            Control::Next => out.push(Intent::Next),
-            Control::Previous => out.push(Intent::Previous),
+            Control::Next => {
+                self.mobile_cover.direction = -1.;
+                out.push(Intent::Next);
+            }
+            Control::Previous => {
+                self.mobile_cover.direction = 1.;
+                out.push(Intent::Previous);
+            }
             Control::Shuffle => {
                 self.shuffle = !self.shuffle;
                 out.push(Intent::Shuffle(self.shuffle));
@@ -2139,19 +2191,115 @@ impl GlassUi {
         let mut out = vec![];
         self.touch_delta = 0.;
         if crate::platform::mobile() {
+            let time = ctx.input(|i| i.time);
+            let dt = (time - self.touch_frame).clamp(0., 0.04) as f32;
+            self.touch_frame = time;
             if ctx.input(|i| i.pointer.primary_pressed()) {
-                self.touch_start = ctx.input(|i| i.pointer.interact_pos().map(|p| (p, i.time)));
+                self.touch_start = ctx.input(|i| {
+                    i.pointer
+                        .press_origin()
+                        .or_else(|| {
+                            i.events.iter().find_map(|event| match event {
+                                egui::Event::PointerButton {
+                                    pos,
+                                    button: egui::PointerButton::Primary,
+                                    pressed: true,
+                                    ..
+                                } => Some(*pos),
+                                _ => None,
+                            })
+                        })
+                        .or(i.pointer.interact_pos())
+                        .map(|p| (p, i.time))
+                });
                 self.touch_long = false;
+                if let Some((p, _)) = self.touch_start {
+                    let contains = |name: &str| {
+                        self.renderer
+                            .regions
+                            .get(name)
+                            .is_some_and(|(b, c)| b.intersect(*c).contains(p))
+                    };
+                    let slider = self
+                        .renderer
+                        .hits
+                        .iter()
+                        .rev()
+                        .find(|h| h.contains(p))
+                        .is_some_and(|h| {
+                            matches!(
+                                h.control,
+                                Control::Seek
+                                    | Control::Volume
+                                    | Control::VerticalVolume
+                                    | Control::EqBand(_)
+                                    | Control::Crossfade
+                                    | Control::Preamp
+                            )
+                        });
+                    let mut scroll = None;
+                    let area = if slider {
+                        touch::Area::Slider
+                    } else if contains("Lyrics content") {
+                        touch::Area::Lyrics
+                    } else if self.overlay.is_some() {
+                        if contains("Dialog content") {
+                            scroll = Some("dialog-scroll".into());
+                            touch::Area::Scroll
+                        } else {
+                            touch::Area::None
+                        }
+                    } else if !self.zen && contains("Floating player") {
+                        touch::Area::Mini
+                    } else if self.zen && contains("Zen artwork") {
+                        touch::Area::Artwork
+                    } else if contains("Cover flow · swipe") {
+                        touch::Area::Cards
+                    } else {
+                        scroll = ["results", "artist", "favorites", "playlist"]
+                            .into_iter()
+                            .find(|k| contains(&format!("list/{k}")))
+                            .map(str::to_owned)
+                            .or_else(|| {
+                                contains("Main content").then(|| format!("page/{:?}", self.page))
+                            });
+                        if scroll.is_some() {
+                            touch::Area::Scroll
+                        } else {
+                            touch::Area::None
+                        }
+                    };
+                    self.touch.begin(p, time, area, scroll);
+                }
             }
             if ctx.input(|i| i.pointer.primary_down()) && self.drag.is_none() {
-                if let Some((start, _)) = self.touch_start {
-                    if ctx.input(|i| {
-                        i.pointer
-                            .interact_pos()
-                            .is_some_and(|p| p.distance(start) > 8.)
-                    }) {
-                        self.touch_delta = ctx.input(|i| i.pointer.delta().y);
-                    }
+                if let Some(p) = pointer_position(ctx) {
+                    self.touch_delta = self.touch.moved(p, time);
+                }
+            }
+            if ctx.input(|i| i.pointer.primary_released())
+                && self.drag.is_none()
+                && !self.touch_long
+            {
+                if let Some(p) = pointer_position(ctx) {
+                    self.touch.moved(p, time);
+                }
+                if let Some(next) = self.touch.next() {
+                    self.mobile_cover.direction = if next { -1. } else { 1. };
+                    out.push(if next { Intent::Next } else { Intent::Previous });
+                    self.touch_long = true;
+                } else if let Some(zen) = self.touch.zen(ctx.screen_rect().height()) {
+                    self.zen = zen;
+                    self.page_from = None;
+                    out.push(Intent::Zen(zen));
+                    self.touch_long = true;
+                }
+                self.touch.release();
+            }
+            if !ctx.input(|i| i.pointer.primary_down()) {
+                if let Some((key, delta)) = self.touch.coast(dt) {
+                    let value = self.offsets.entry(key).or_default();
+                    *value = (*value + delta).max(0.);
                 }
             }
         }
@@ -2218,14 +2366,34 @@ impl GlassUi {
         } else {
             motion::ambient(now)
         };
-        let mut root = if self.zen {
+        if self.layout.mobile && self.zen_target != self.zen {
+            if self.zen {
+                self.zen_background = self.last_root.clone();
+            } else {
+                let mut background = self.compose(ctx, m);
+                let offset = self
+                    .offsets
+                    .get(&format!("page/{:?}", self.page))
+                    .copied()
+                    .unwrap_or(0.);
+                self.layout.root(&mut background, self.page, offset);
+                theme::apply(&mut background, self.dark);
+                self.zen_background = Some(background);
+            }
+            self.zen_target = self.zen;
+        }
+        let zen_level =
+            self.zen_motion
+                .value(if self.zen { 1. } else { 0. }, now, self.reduced_motion);
+        let showing_zen = self.zen || (self.layout.mobile && zen_level > 0.001);
+        let mut root = if showing_zen {
             panels::zen(self, ctx, m, ctx.input(|i| i.pointer.hover_pos()))
         } else {
             self.compose(ctx, m)
         };
         let key = format!("page/{:?}", self.page);
         let scroll = *self.offsets.get(&key).unwrap_or(&0.);
-        self.page_scroll_max = if self.zen {
+        self.page_scroll_max = if showing_zen {
             0.
         } else {
             self.layout.root(&mut root, self.page, scroll)
@@ -2278,34 +2446,71 @@ impl GlassUi {
             }
         }
         theme::apply(&mut root, self.dark);
-        if self.layout.mobile {
-            let target = self
-                .touch_start
-                .and_then(|(start, _)| {
-                    let name = if self.zen {
-                        "Zen artwork"
-                    } else {
-                        "Floating player"
-                    };
-                    self.renderer
-                        .regions
-                        .get(name)
-                        .filter(|(bounds, clip)| bounds.intersect(*clip).contains(start))?;
-                    let current = ctx.input(|i| {
-                        i.pointer
-                            .interact_pos()
-                            .filter(|_| i.pointer.primary_down())
-                    })?;
-                    let delta = current - start;
-                    (delta.x.abs() > delta.y.abs() * 1.3 && self.drag.is_none())
-                        .then_some(delta.x.clamp(-180., 180.) * 0.18)
-                })
-                .unwrap_or(0.);
-            let dx = self
-                .gesture_translation
-                .value(target, now, self.reduced_motion);
-            if let Some(n) = root.find_mut(if self.zen {
-                "Zen artwork"
+        if self.layout.mobile && showing_zen {
+            let held = ctx.input(|i| i.pointer.primary_down())
+                && self.touch.area == touch::Area::Artwork
+                && self.touch.axis == touch::Axis::Horizontal;
+            let drag = if held {
+                let dx = self
+                    .touch
+                    .delta
+                    .x
+                    .clamp(-self.layout.size.x * 0.9, self.layout.size.x * 0.9);
+                self.art_drag = transitions::Tween::new(dx);
+                dx
+            } else {
+                self.art_drag.value(0., now, self.reduced_motion)
+            };
+            let preview = m.cursor.and_then(|i| {
+                if drag < 0. {
+                    m.queue.get(i + 1)
+                } else {
+                    i.checked_sub(1).and_then(|i| m.queue.get(i))
+                }
+            });
+            self.mobile_cover.apply(
+                &mut root,
+                m.status.track.as_ref().map(Track::key),
+                drag,
+                preview,
+                now,
+                self.reduced_motion,
+            );
+        }
+        let waiting = self.feedback.visible;
+        root.visit(&mut |n| {
+            if matches!(n.command, Some(Control::PlayPause)) || n.name == "Album/sonora-start" {
+                n.visit(&mut |child| {
+                    if matches!(child.asset.as_deref(), Some("play" | "pause")) {
+                        if waiting > 0.005 {
+                            child.opacity *= 1. - waiting;
+                        } else if m.status.error.is_some() {
+                            child.asset = Some("refresh-cw".into());
+                        }
+                    }
+                });
+            }
+        });
+        if self.layout.mobile && !showing_zen {
+            let held = ctx.input(|i| i.pointer.primary_down())
+                && self.touch.axis == touch::Axis::Horizontal;
+            let target = if held {
+                self.touch
+                    .delta
+                    .x
+                    .clamp(-self.layout.size.x * 0.8, self.layout.size.x * 0.8)
+                    * 0.85
+            } else {
+                0.
+            };
+            let dx = if held {
+                self.gesture_translation = transitions::Tween::new(target);
+                target
+            } else {
+                self.gesture_translation.value(0., now, self.reduced_motion)
+            };
+            if let Some(n) = root.find_mut(if self.touch.area == touch::Area::Cards {
+                "Cover flow · swipe"
             } else {
                 "Floating player"
             }) {
@@ -2323,6 +2528,43 @@ impl GlassUi {
         if let Some(stage) = root.find_mut("Cover flow · swipe") {
             self.carousel
                 .apply(&mut stage.children, now, self.reduced_motion);
+        }
+        let mut zen_underlay = None;
+        if self.layout.mobile && showing_zen {
+            let held = ctx.input(|i| i.pointer.primary_down())
+                && self.touch.area == touch::Area::Artwork
+                && self.touch.axis == touch::Axis::Vertical;
+            let drag = if held {
+                let d = self.touch.delta.y.max(0.);
+                self.zen_drag = transitions::Tween::new(d);
+                d
+            } else {
+                self.zen_drag.value(0., now, self.reduced_motion)
+            };
+            let offset = (1. - zen_level) * self.layout.size.y + drag;
+            if offset > 0.1 {
+                zen_underlay = self.zen_background.clone();
+                let mut backdrop = panels::frame(
+                    "Zen sheet backdrop",
+                    0.,
+                    0.,
+                    self.layout.size.x,
+                    self.layout.size.y,
+                );
+                backdrop.corner_radius = 28.;
+                backdrop.fills = vec![panels::fill(
+                    if self.dark {
+                        [14. / 255., 12. / 255., 18. / 255.]
+                    } else {
+                        [249. / 255., 248. / 255., 246. / 255.]
+                    },
+                    1.,
+                )];
+                root.children.insert(0, backdrop);
+                for child in &mut root.children {
+                    child.move_to(child.x, child.y + offset);
+                }
+            }
         }
         if self.rendered_page != self.page {
             self.page_from = self.last_root.clone();
@@ -2414,6 +2656,10 @@ impl GlassUi {
                         Color32::from_rgb(249, 248, 246)
                     },
                 );
+                if let Some(background) = &zen_underlay {
+                    self.renderer
+                        .paint(ui.painter(), background, transform, 1., true, false);
+                }
                 if let Some(previous) = &previous {
                     self.renderer
                         .paint(ui.painter(), previous, transform, 1., true, false);
@@ -2506,6 +2752,7 @@ impl GlassUi {
                         .paint(ui.painter(), &toast, transform, 1., true, false);
                 }
                 self.renderer.finish(ctx);
+                feedback::paint(self, ctx, m, ui.painter());
             });
         if self.page == Page::Artist && self.overlay.is_none() && !self.zen {
             if let Some(catalog) = &m.artist {
@@ -2525,7 +2772,7 @@ impl GlassUi {
                 }
             }
         }
-        let pointer = ctx.input(|i| i.pointer.interact_pos());
+        let pointer = pointer_position(ctx);
         if crate::platform::mobile() && self.overlay.is_none() {
             if let (Some((start, at)), Some(current)) = (self.touch_start, pointer) {
                 if !self.touch_long
@@ -2553,48 +2800,6 @@ impl GlassUi {
                             egui::Pos2::ZERO,
                             egui::Vec2::ZERO,
                         );
-                    }
-                }
-                if ctx.input(|i| i.pointer.primary_released())
-                    && self.drag.is_none()
-                    && !self.touch_long
-                {
-                    let dx = current.x - start.x;
-                    let dy = current.y - start.y;
-                    let over_cover = self
-                        .renderer
-                        .regions
-                        .get("Cover flow · swipe")
-                        .is_some_and(|(bounds, clip)| bounds.intersect(*clip).contains(start));
-                    let over_mini = self
-                        .renderer
-                        .regions
-                        .get("Floating player")
-                        .is_some_and(|(b, c)| b.intersect(*c).contains(start));
-                    let over_zen = self
-                        .renderer
-                        .regions
-                        .get("Zen artwork")
-                        .is_some_and(|(b, c)| b.intersect(*c).contains(start));
-                    if (over_cover || over_mini || over_zen)
-                        && dx.abs() > 45.
-                        && dx.abs() > dy.abs() * 1.3
-                    {
-                        out.push(if dx < 0. {
-                            Intent::Next
-                        } else {
-                            Intent::Previous
-                        });
-                        self.touch_long = true;
-                    } else if dy.abs() > 64.
-                        && dy.abs() > dx.abs() * 1.4
-                        && ((over_mini && dy < 0.) || (over_zen && dy > 0.))
-                    {
-                        let zen = dy < 0.;
-                        self.zen = zen;
-                        self.page_from = None;
-                        out.push(Intent::Zen(zen));
-                        self.touch_long = true;
                     }
                 }
             }
@@ -2699,7 +2904,10 @@ impl GlassUi {
                         self.process(control, m, &mut out, t.inverse(pointer), size);
                     }
                 }
-            } else if !self.touch_long && ctx.input(|i| i.pointer.primary_clicked()) {
+            } else if !self.touch_long
+                && !(self.layout.mobile && self.touch.suppress_click)
+                && ctx.input(|i| i.pointer.primary_clicked())
+            {
                 if let Some(hit) = hit {
                     let control = hit.control.clone();
                     let local = hit.transform.inverse(pointer);
@@ -2736,6 +2944,16 @@ impl GlassUi {
             self.drag = None;
             self.seek_preview = None;
             self.touch_start = None;
+        }
+        if self.layout.mobile
+            && !self.reduced_motion
+            && (ctx.input(|i| i.pointer.primary_down())
+                || self.touch.kinetic.is_some()
+                || self.zen_motion.active(now)
+                || self.zen_drag.active(now)
+                || self.art_drag.active(now))
+        {
+            ctx.request_repaint();
         }
         ctx.request_repaint_after(std::time::Duration::from_millis(if self.reduced_motion {
             100

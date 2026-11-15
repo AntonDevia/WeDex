@@ -25,6 +25,36 @@ impl Connection {
         crate::database::digest(&self.certificate)
     }
 }
+/// Only the release-update endpoints accept a native device token. No owner credential is copied to a phone.
+pub fn blocking_update(connection: &Connection, status: bool) -> Result<serde_json::Value> {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?
+        .block_on(async {
+            let http = reqwest::Client::builder()
+                .https_only(true)
+                .redirect(reqwest::redirect::Policy::none())
+                .tls_built_in_root_certs(false)
+                .add_root_certificate(reqwest::Certificate::from_pem(
+                    connection.certificate.as_bytes(),
+                )?)
+                .timeout(Duration::from_secs(35))
+                .build()?;
+            let request = if status {
+                http.get(format!("{}api/update/status", connection.endpoint))
+            } else {
+                http.post(format!("{}api/update", connection.endpoint))
+                    .json(&serde_json::json!({}))
+            };
+            Ok(request
+                .bearer_auth(&connection.credentials.token)
+                .send()
+                .await?
+                .error_for_status()?
+                .json()
+                .await?)
+        })
+}
 pub async fn pair(invitation: &Invitation, name: &str, can_play: bool) -> Result<Connection> {
     // Validate externally supplied endpoint before sending its one-use invitation.
     Invitation::decode(&invitation.encode())?;

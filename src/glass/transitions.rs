@@ -43,6 +43,9 @@ impl Tween {
         let t = ((time - self.started) / DURATION).clamp(0., 1.) as f32;
         self.from + (self.target - self.from) * (t * t * (3. - 2. * t))
     }
+    pub fn active(&self, time: f64) -> bool {
+        (self.target - self.from).abs() > 0.001 && time - self.started < DURATION
+    }
 }
 #[derive(Clone)]
 struct Style {

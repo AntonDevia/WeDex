@@ -22,6 +22,7 @@ pub const BANDS: [f32; 10] = crate::equalizer::FREQUENCIES;
 
 #[derive(Clone, Default)]
 pub struct Status {
+    pub buffering: bool,
     pub ticket: u64,
     pub loading: bool,
     pub playing: bool,

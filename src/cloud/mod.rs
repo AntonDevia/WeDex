@@ -21,7 +21,6 @@ use wedex_cloud::{
 
 #[derive(Clone)]
 pub enum Action {
-    #[cfg(windows)]
     UpdateServer,
     #[cfg(windows)]
     Provision(Box<wedex_provision::Request>),
@@ -49,6 +48,7 @@ pub enum Action {
 }
 #[derive(Clone, Default)]
 pub struct View {
+    pub transport_pending: bool,
     pub server_updating: bool,
     pub sync_status: String,
     pub server_version: String,
@@ -56,6 +56,7 @@ pub struct View {
     #[cfg(windows)]
     pub vps: vps::View,
     pub owner_access: bool,
+    pub can_update_server: bool,
     pub server_running: bool,
     pub busy: bool,
     pub connected: bool,
@@ -74,14 +75,33 @@ pub struct View {
 enum Job {
     Version(String, anyhow::Result<String>),
     ServerUpdateStatus(u64, anyhow::Result<serde_json::Value>),
-    #[cfg(windows)]
     ServerUpdate(u64, anyhow::Result<serde_json::Value>),
     Revoked(u64, anyhow::Result<()>),
     Invited(u64, bool, anyhow::Result<Invitation>),
     Started(u64, anyhow::Result<(RunningServer, Connection)>),
     Paired(u64, anyhow::Result<Connection>),
 }
+enum Updater {
+    Owner(wedex_cloud::admin::Owner),
+    Device(Connection),
+}
+impl Updater {
+    fn blocking_update(&self) -> anyhow::Result<serde_json::Value> {
+        match self {
+            Self::Owner(o) => o.blocking_update(),
+            Self::Device(c) => client::blocking_update(c, false),
+        }
+    }
+    fn blocking_update_status(&self) -> anyhow::Result<serde_json::Value> {
+        match self {
+            Self::Owner(o) => o.blocking_update_status(),
+            Self::Device(c) => client::blocking_update(c, true),
+        }
+    }
+}
 pub struct Cloud {
+    owner: Option<wedex_cloud::admin::Owner>,
+    transport: Option<Transport>,
     hitmo: hitmo::Discovery,
     last_update: Instant,
     update_started: Instant,
@@ -104,6 +124,15 @@ pub struct Cloud {
     explicit_target: bool,
     pending_volume: Option<(String, f32, Instant)>,
 }
+struct Transport {
+    id: String,
+    target: String,
+    at: Instant,
+    updated: u64,
+    done: bool,
+    playing: Option<bool>,
+    seek: Option<f64>,
+}
 pub struct LocalPlayback<'a> {
     pub status: &'a audio::Status,
     pub queue: &'a [Track],
@@ -118,20 +147,18 @@ impl View {
             .iter()
             .find(|d| d.id == self.selected && d.id != self.own_device && d.can_play)
     }
-    pub fn remote_playback(&self) -> Option<Playback> {
-        let device = self.remote_device()?;
-        let mut p = device.playback.clone();
-        if !self.connected || !device.online {
-            p.playing = false;
-            p.loading = false;
-        } else if p.playing && !p.loading {
+    pub fn position(&self, p: &Playback) -> f64 {
+        let Some(device) = self.remote_device() else {
+            return p.position;
+        };
+        if self.connected && device.online && p.playing && !p.loading {
             if let Some((id, _, at)) = &self.observed {
                 if id == &device.id {
-                    p.position = (p.position + at.elapsed().as_secs_f64().min(2.)).min(p.duration);
+                    return (p.position + at.elapsed().as_secs_f64().min(2.)).min(p.duration);
                 }
             }
         }
-        Some(p)
+        p.position
     }
 }
 pub fn display_track(t: &wedex_cloud::Track) -> anyhow::Result<Track> {
@@ -188,6 +215,8 @@ impl Cloud {
     pub fn new(preview: bool) -> Self {
         let (sender, receiver) = mpsc::channel();
         let mut cloud = Self {
+            owner: None,
+            transport: None,
             last_update: Instant::now(),
             update_started: Instant::now(),
             sync: Default::default(),
@@ -227,13 +256,16 @@ impl Cloud {
         self.view.status = "Что-то пошло не так".into();
     }
     fn attach(&mut self, mut connection: Connection, save: bool) -> anyhow::Result<()> {
+        self.transport = None;
+        self.view.transport_pending = false;
         self.hitmo = Default::default();
-        let owner =
+        self.owner =
             serde_json::from_str::<wedex_cloud::admin::Owner>(&store::secret("cloud-owner"))
                 .ok()
-                .is_some_and(|o| {
+                .filter(|o| {
                     o.endpoint == connection.endpoint && o.certificate == connection.certificate
                 });
+        let owner = self.owner.is_some();
         let mut save = save;
         if connection.sync_key.is_none() && (self.server.is_some() || owner) {
             connection.sync_key = Some(wedex_cloud::vault::new_key()?);
@@ -250,12 +282,7 @@ impl Cloud {
         self.client = Some(Client::spawn(connection.clone())?);
         self.view.own_device = connection.credentials.device_id.clone();
         self.view.endpoint = connection.endpoint.clone();
-        self.view.owner_access =
-            serde_json::from_str::<wedex_cloud::admin::Owner>(&store::secret("cloud-owner"))
-                .is_ok_and(|owner| {
-                    owner.endpoint == connection.endpoint
-                        && owner.certificate == connection.certificate
-                });
+        self.view.owner_access = owner;
         self.view.devices.clear();
         self.view.statistics = Statistics::default();
         self.view.selected.clear();
@@ -271,9 +298,8 @@ impl Cloud {
     }
     pub fn action(&mut self, action: Action) {
         let result = match action {
-            #[cfg(windows)]
             Action::UpdateServer => {
-                if let Some(owner) = self.remote_owner() {
+                if let Some(owner) = self.remote_updater() {
                     if self.view.server_updating {
                         return;
                     }
@@ -515,13 +541,63 @@ impl Cloud {
                             d.playback.volume = *value;
                         }
                     }
-                    self.send(ClientMessage::Command {
-                        command: RemoteCommand {
-                            id: uuid::Uuid::new_v4().to_string(),
-                            target,
-                            action,
-                        },
-                    })
+                    let id = uuid::Uuid::new_v4().to_string();
+                    let transport = matches!(
+                        &action,
+                        wedex_cloud::Action::Next
+                            | wedex_cloud::Action::Previous
+                            | wedex_cloud::Action::Seek { .. }
+                            | wedex_cloud::Action::SetPlaying { .. }
+                            | wedex_cloud::Action::QueueIndex { .. }
+                            | wedex_cloud::Action::PlayTrack { .. }
+                            | wedex_cloud::Action::PlayCollection { .. }
+                    );
+                    let playing = if let wedex_cloud::Action::SetPlaying { playing } = &action {
+                        Some(*playing)
+                    } else {
+                        None
+                    };
+                    let seek = if let wedex_cloud::Action::Seek { seconds } = &action {
+                        Some(*seconds)
+                    } else {
+                        None
+                    };
+                    let pending = Transport {
+                        id: id.clone(),
+                        target: target.clone(),
+                        at: Instant::now(),
+                        updated: self
+                            .view
+                            .devices
+                            .iter()
+                            .find(|d| d.id == target)
+                            .map(|d| d.updated_ms)
+                            .unwrap_or(0),
+                        done: false,
+                        playing,
+                        seek,
+                    };
+                    let result = self.send(ClientMessage::Command {
+                        command: RemoteCommand { id, target, action },
+                    });
+                    if result.is_ok() && transport {
+                        if let Some(d) = self
+                            .view
+                            .devices
+                            .iter_mut()
+                            .find(|d| d.id == pending.target)
+                        {
+                            if let Some(playing) = pending.playing {
+                                d.playback.playing = playing;
+                            }
+                            if let Some(position) = pending.seek {
+                                d.playback.position = position;
+                            }
+                        }
+                        self.transport = Some(pending);
+                        self.view.transport_pending = true;
+                    }
+                    result
                 } else {
                     Err(anyhow::anyhow!("Выбранное устройство недоступно"))
                 }
@@ -585,16 +661,25 @@ impl Cloud {
             }
         }
     }
+    fn remote_updater(&self) -> Option<Updater> {
+        self.remote_owner().map(Updater::Owner).or_else(|| {
+            self.view
+                .capabilities
+                .iter()
+                .any(|c| c == "device-server-update")
+                .then(|| self.connection.clone())
+                .flatten()
+                .map(Updater::Device)
+        })
+    }
     fn remote_owner(&self) -> Option<wedex_cloud::admin::Owner> {
-        serde_json::from_str::<wedex_cloud::admin::Owner>(&store::secret("cloud-owner"))
-            .ok()
-            .filter(|owner| {
-                owner.endpoint == self.view.endpoint
-                    && self
-                        .connection
-                        .as_ref()
-                        .is_some_and(|c| c.certificate == owner.certificate)
-            })
+        self.owner.clone().filter(|owner| {
+            owner.endpoint == self.view.endpoint
+                && self
+                    .connection
+                    .as_ref()
+                    .is_some_and(|c| c.certificate == owner.certificate)
+        })
     }
     #[cfg(windows)]
     fn poll_provision(&mut self) {
@@ -684,6 +769,14 @@ impl Cloud {
         }
     }
     pub fn tick(&mut self, local: LocalPlayback<'_>, store: Option<&Store>) -> Vec<Delivery> {
+        if self
+            .transport
+            .as_ref()
+            .is_some_and(|p| p.at.elapsed() > Duration::from_secs(8))
+        {
+            self.transport = None;
+            self.view.transport_pending = false;
+        }
         if self.view.server_updating && self.update_started.elapsed() > Duration::from_secs(1200) {
             self.view.server_updating = false;
             self.error(anyhow::anyhow!(
@@ -691,7 +784,7 @@ impl Cloud {
             ));
         }
         if self.view.server_updating && self.last_update.elapsed() > Duration::from_secs(3) {
-            if let Some(owner) = self.remote_owner() {
+            if let Some(owner) = self.remote_updater() {
                 let sender = self.sender.clone();
                 let generation = self.generation;
                 std::thread::spawn(move || {
@@ -705,6 +798,7 @@ impl Cloud {
         }
         #[cfg(windows)]
         self.poll_provision();
+        self.view.can_update_server = self.remote_updater().is_some();
         let LocalPlayback {
             status,
             queue,
@@ -739,7 +833,6 @@ impl Cloud {
                 {
                     self.view.server_version = version
                 }
-                #[cfg(windows)]
                 Job::ServerUpdate(generation, result) if generation == self.generation => {
                     match result {
                         Ok(value) if value["state"] == "up_to_date" => {
@@ -908,6 +1001,26 @@ impl Cloud {
                             .unwrap_or_default();
                     }
                     self.view.devices = devices;
+                    if let Some(pending) = &self.transport {
+                        if let Some(d) = self
+                            .view
+                            .devices
+                            .iter_mut()
+                            .find(|d| d.id == pending.target)
+                        {
+                            if pending.done && d.updated_ms > pending.updated {
+                                self.transport = None;
+                                self.view.transport_pending = false;
+                            } else {
+                                if let Some(playing) = pending.playing {
+                                    d.playback.playing = playing;
+                                }
+                                if let Some(position) = pending.seek {
+                                    d.playback.position = position;
+                                }
+                            }
+                        }
+                    }
                     if let Some(d) = self
                         .view
                         .devices
@@ -938,10 +1051,19 @@ impl Cloud {
                         deliveries.push(delivery);
                     }
                 }
+                client::Event::Message(ServerMessage::CommandStatus { id, status })
+                    if status == "done" =>
+                {
+                    if let Some(p) = self.transport.as_mut().filter(|p| p.id == id) {
+                        p.done = true;
+                    }
+                }
                 client::Event::Message(ServerMessage::CommandStatus { status, .. })
                     if status == "rejected" || status == "offline" =>
                 {
                     self.pending_volume = None;
+                    self.transport = None;
+                    self.view.transport_pending = false;
                     self.error(anyhow::anyhow!("Удалённая команда: {status}"));
                 }
                 client::Event::Message(ServerMessage::SessionsStored { sessions }) => {
@@ -1006,7 +1128,7 @@ impl Cloud {
                     queue: published_queue,
                     cursor: cursor.filter(|i| *i < queue.len().min(500)),
                     playing: status.playing,
-                    loading: status.loading,
+                    loading: status.loading || status.buffering,
                     position: status.position.max(0.) as f64,
                     duration: status.duration.max(0.) as f64,
                     volume: settings.volume,

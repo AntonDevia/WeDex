@@ -55,7 +55,14 @@ enum Action {
     Open(String),
 }
 
+#[derive(Default)]
+struct QueueSnapshot {
+    local: Arc<Vec<Track>>,
+    remote_source: Vec<wedex_cloud::Track>,
+    remote: Arc<Vec<Track>>,
+}
 pub struct App {
+    ui_queue: std::cell::RefCell<QueueSnapshot>,
     settings_due: Option<Instant>,
     wave: Option<crate::providers::wave::Session>,
     wave_feedback: crate::wave_feedback::Feedback,
@@ -234,6 +241,7 @@ impl App {
             artist_request: 0,
             downloads: crate::cache_manager::Manager::new(preview.is_some()),
             settings_due: None,
+            ui_queue: Default::default(),
             wave: None,
             wave_feedback: crate::wave_feedback::Feedback::new(),
             lyrics: None,
@@ -343,7 +351,7 @@ impl App {
         if self.query.trim().is_empty() {
             return;
         }
-        if self.settings.offline_only {
+        if self.settings.offline_only || crate::network::state() == crate::network::State::Offline {
             let query = crate::model::normalize(&self.query);
             self.results = self
                 .downloads
@@ -355,7 +363,7 @@ impl App {
                 .collect();
             self.artists.clear();
             self.searching = false;
-            self.message = "Поиск в скачанных треках".into();
+            self.message.clear();
             return;
         }
         self.search_id += 1;
@@ -494,7 +502,7 @@ impl App {
         if self.generating {
             return;
         }
-        if self.settings.offline_only {
+        if self.settings.offline_only || crate::network::state() == crate::network::State::Offline {
             self.message = "Офлайн-режим: музыка доступна в скачанных треках".into();
             return;
         }
@@ -674,11 +682,24 @@ impl App {
             .take(3)
             .cloned()
             .collect::<Vec<_>>();
-        for mut track in upcoming {
+        for (offset, mut track) in upcoming.into_iter().enumerate() {
             if self.settings.prefer_original {
                 if let Some(t) = self.store.as_ref().and_then(|s| s.replacement(&track)) {
                     track = t;
                 }
+            }
+            if offset > 0
+                && track.provider == Provider::Yandex
+                && !self.settings.offline_only
+                && crate::network::state() == crate::network::State::Online
+                && self.prefetch_requested.insert(track.key())
+            {
+                let key = track.key();
+                self.job(move |services| {
+                    let _ = services.playback_recording(&track);
+                    Event::Prefetched(key, Ok(track))
+                });
+                continue;
             }
             if !self.settings.offline_only
                 && !self
@@ -733,7 +754,7 @@ impl App {
     }
     fn next(&mut self) {
         let next = self.cursor.map(|i| i + 1).unwrap_or(0);
-        if self.settings.offline_only {
+        if self.settings.offline_only || crate::network::state() == crate::network::State::Offline {
             if let Some(index) = (next..self.queue.len()).find(|i| {
                 self.downloads
                     .view
@@ -1370,6 +1391,7 @@ impl App {
             out
         };
         let mut model = Model {
+            network: crate::network::state(),
             downloads: self.downloads.view.clone(),
             player_liked: None,
             updates: self.updates.view.clone(),
@@ -1381,7 +1403,13 @@ impl App {
                 .preview_status
                 .clone()
                 .unwrap_or_else(|| self.player.status()),
-            queue: self.queue.clone(),
+            queue: {
+                let mut cached = self.ui_queue.borrow_mut();
+                if cached.local.as_ref() != &self.queue {
+                    cached.local = Arc::new(self.queue.clone());
+                }
+                cached.local.clone()
+            },
             cursor: self.cursor,
             favorites: self.favorites.clone(),
             results: self.results.clone(),
@@ -1418,12 +1446,20 @@ impl App {
         if let Some(p) = self.controlled_playback() {
             model.status = self.display_status();
             model.sonora_ready = p.track.is_some();
-            model.sonora_loading = p.loading;
-            model.queue = p
-                .queue
-                .iter()
-                .filter_map(|t| crate::cloud::display_track(t).ok())
-                .collect();
+            model.sonora_loading = p.loading
+                && self.cloud.view.connected
+                && self.cloud.view.remote_device().is_some_and(|d| d.online);
+            let mut cached = self.ui_queue.borrow_mut();
+            if cached.remote_source != p.queue {
+                cached.remote = Arc::new(
+                    p.queue
+                        .iter()
+                        .filter_map(|t| crate::cloud::display_track(t).ok())
+                        .collect(),
+                );
+                cached.remote_source = p.queue.clone();
+            }
+            model.queue = cached.remote.clone();
             model.cursor = p.cursor;
             model.player_liked = p.track.as_ref().map(|t| t.liked);
             model.settings.volume = p.volume;
@@ -1436,13 +1472,13 @@ impl App {
                 .map(|p| p.name)
                 .unwrap_or("Своя настройка")
                 .into();
-            model.resolving = p.loading;
+            model.resolving = model.sonora_loading;
         }
         model
     }
-    fn controlled_playback(&self) -> Option<wedex_cloud::Playback> {
+    fn controlled_playback(&self) -> Option<&wedex_cloud::Playback> {
         crate::platform::mobile()
-            .then(|| self.cloud.view.remote_playback())
+            .then(|| self.cloud.view.remote_device().map(|d| &d.playback))
             .flatten()
     }
     fn display_status(&self) -> audio::Status {
@@ -1452,9 +1488,11 @@ impl App {
                     .track
                     .as_ref()
                     .and_then(|t| crate::cloud::display_track(t).ok()),
-                playing: p.playing,
-                loading: p.loading,
-                position: p.position as f32,
+                playing: p.playing
+                    && self.cloud.view.connected
+                    && self.cloud.view.remote_device().is_some_and(|d| d.online),
+                loading: p.loading && self.cloud.view.connected,
+                position: self.cloud.view.position(p) as f32,
                 duration: p.duration as f32,
                 ..Default::default()
             };
@@ -1557,7 +1595,9 @@ impl App {
     pub(crate) fn background_tick(&mut self) {
         if self.preview_status.is_none() {
             self.updates.tick(
-                if self.cloud.view.owner_access && !self.cloud.view.server_running {
+                if (self.cloud.view.owner_access || self.cloud.view.can_update_server)
+                    && !self.cloud.view.server_running
+                {
                     &self.cloud.view.server_version
                 } else {
                     ""
@@ -1757,7 +1797,6 @@ impl App {
             }
             Intent::Cloud(action) => self.cloud.action(action),
             Intent::Update(action) => {
-                #[cfg(windows)]
                 if matches!(action, crate::updates::Action::Server) {
                     if !self
                         .cloud
@@ -1766,7 +1805,14 @@ impl App {
                         .iter()
                         .any(|c| c == "server-update")
                     {
-                        self.interface.overlay = Some(crate::glass::Overlay::Vps);
+                        #[cfg(windows)]
+                        {
+                            self.interface.overlay = Some(crate::glass::Overlay::Vps);
+                        }
+                        #[cfg(not(windows))]
+                        {
+                            self.message = "Сначала обновите сервер с ПК".into();
+                        }
                     } else {
                         self.cloud.action(crate::cloud::Action::UpdateServer);
                     }

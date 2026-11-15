@@ -94,7 +94,7 @@ fn prepare_cached(
             return Ok((decoder, buffer));
         }
     }
-    if offline {
+    if offline || crate::network::state() == crate::network::State::Offline {
         return Err("Трек ещё не скачан на это устройство".into());
     }
     let recording = services

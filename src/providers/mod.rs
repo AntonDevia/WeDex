@@ -468,8 +468,8 @@ impl Services {
         }
         let mut lookup = self.clone();
         lookup.http = Client::builder()
-            .connect_timeout(Duration::from_secs(3))
-            .timeout(Duration::from_secs(6))
+            .connect_timeout(Duration::from_millis(1800))
+            .timeout(Duration::from_secs(3))
             .user_agent("WeDex audio matching")
             .build()?;
         if let Ok(tracks) = lookup.hitmotop_search(&original.query()) {

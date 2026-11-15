@@ -266,6 +266,25 @@ pub(super) fn compose(
                 h,
             ));
             next_y += h + 12.;
+        } else if m.searching && !tiny {
+            let mut pending = card("Pending search hero", l.main_x, next_y, l.main_width, h);
+            pending
+                .children
+                .push(portrait(None, 12., 12., (h - 24.).max(24.), true));
+            for (i, width) in [(0, 0.55), (1, 0.35)] {
+                let mut bar = frame(
+                    "Search placeholder",
+                    h,
+                    22. + i as f32 * 24.,
+                    (l.main_width - h - 24.) * width,
+                    10.,
+                );
+                bar.corner_radius = 5.;
+                bar.fills = vec![fill([0.5, 0.48, 0.53], 0.12)];
+                pending.children.push(bar);
+            }
+            root.children.push(pending);
+            next_y += h + 12.;
         }
         let inset = if inline_artist { 222. } else { 0. };
         let width = l.main_width - inset;
@@ -333,7 +352,7 @@ pub(super) fn compose(
             &tracks,
             (next_y, "results"),
             if m.searching {
-                "Ищем музыку…"
+                ""
             } else {
                 "В этом источнике ничего не найдено"
             },

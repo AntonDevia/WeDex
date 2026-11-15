@@ -197,7 +197,7 @@ pub fn publish(status: &audio::Status, remote: bool, volume: f32) {
     // gesture. Throttle progress updates, never transport-state transitions.
     if last.at.elapsed() < Duration::from_millis(500)
         && last.playing == status.playing
-        && last.loading == status.loading
+        && last.loading == (status.loading || status.buffering)
         && last.track == track
         && last.remote == remote
         && (last.volume - volume).abs() < 0.001
@@ -207,12 +207,12 @@ pub fn publish(status: &audio::Status, remote: bool, volume: f32) {
     *last = Published {
         at: Instant::now(),
         playing: status.playing,
-        loading: status.loading,
+        loading: status.loading || status.buffering,
         track,
         remote,
         volume,
     };
-    let json = serde_json::json!({"remote":remote,"volume":volume,"playing":status.playing,"loading":status.loading,"position":status.position,
+    let json = serde_json::json!({"remote":remote,"volume":volume,"playing":status.playing,"loading":status.loading||status.buffering,"position":status.position,
         "duration":status.duration,"title":status.track.as_ref().map(|t|t.title.as_str()).unwrap_or(""),
         "artist":status.track.as_ref().map(|t|t.artist.as_str()).unwrap_or("")}).to_string();
     let _ = with_activity(|env, activity| {
@@ -257,6 +257,22 @@ pub extern "system" fn Java_app_wedex_music_WeDexActivity_nativeTheme(
     value: jint,
 ) {
     DARK.store(value != 0, Ordering::Relaxed);
+}
+
+#[no_mangle]
+pub extern "system" fn Java_app_wedex_music_WeDexActivity_nativeConnectivity(
+    _: JNIEnv,
+    _: JClass,
+    value: jint,
+) {
+    crate::network::set(value.clamp(0, 2) as u8);
+    if let Some(wake) = WAKE
+        .get()
+        .and_then(|w| w.lock().ok())
+        .and_then(|w| w.clone())
+    {
+        wake.request_repaint();
+    }
 }
 
 struct AndroidUi {
