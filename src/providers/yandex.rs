@@ -102,14 +102,11 @@ impl Services {
         let ids: Vec<String> = likes
             .pointer("/library/tracks")
             .and_then(Value::as_array)
-            .map(|items| {
-                items
-                    .iter()
-                    .map(|t| id(&t["id"]))
-                    .filter(|i| !i.is_empty())
-                    .collect()
-            })
-            .unwrap_or_default();
+            .context("Некорректный список понравившихся Яндекса")?
+            .iter()
+            .map(|t| id(&t["id"]))
+            .filter(|i| !i.is_empty())
+            .collect();
         let mut tracks = Vec::new();
         for batch in ids.chunks(100) {
             let joined = batch.join(",");

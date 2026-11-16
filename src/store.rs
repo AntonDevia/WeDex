@@ -7,6 +7,7 @@ use directories::ProjectDirs;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+mod library;
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -141,6 +142,10 @@ pub struct Store {
     db: Connection,
 }
 impl Store {
+    #[cfg(test)]
+    pub(crate) fn memory_for_test() -> Self {
+        Self::initialize(Connection::open_in_memory().unwrap()).unwrap()
+    }
     pub fn open() -> Result<Self> {
         std::fs::create_dir_all(data_dir())?;
         let db = Connection::open(data_dir().join("library.sqlite3"))?;
@@ -150,6 +155,7 @@ impl Store {
         db.execute_batch("PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS favorites (key TEXT PRIMARY KEY, track TEXT NOT NULL, added INTEGER NOT NULL DEFAULT (unixepoch())); CREATE TABLE IF NOT EXISTS imported (key TEXT PRIMARY KEY, track TEXT NOT NULL); CREATE TABLE IF NOT EXISTS settings (id INTEGER PRIMARY KEY CHECK(id=1), data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS history (id INTEGER PRIMARY KEY, track TEXT NOT NULL, played INTEGER NOT NULL DEFAULT(unixepoch())); CREATE TABLE IF NOT EXISTS replacements (original TEXT PRIMARY KEY, track TEXT NOT NULL);")?;
         db.execute_batch("CREATE TABLE IF NOT EXISTS listening_sessions(id TEXT PRIMARY KEY,revision INTEGER NOT NULL,data TEXT NOT NULL,listened INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS cloud_session_acks(server TEXT NOT NULL,id TEXT NOT NULL,revision INTEGER NOT NULL,PRIMARY KEY(server,id));")?;
+        library::initialize(&db)?;
         Ok(Self { db })
     }
     pub fn settings(&self) -> Settings {
@@ -205,25 +211,40 @@ impl Store {
     pub fn favorites(&self) -> Result<Vec<Track>> {
         let mut stmt = self
             .db
-            .prepare("SELECT track FROM favorites UNION ALL SELECT track FROM imported WHERE key NOT IN (SELECT key FROM favorites)")?;
+            .prepare("SELECT track FROM (SELECT key,track,added FROM favorites UNION ALL SELECT key,track,0 FROM imported WHERE key NOT IN (SELECT key FROM favorites)) WHERE key NOT IN (SELECT key FROM library_hidden) ORDER BY CASE WHEN added<100000000000 THEN added*1000 ELSE added END DESC,key")?;
         let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
         rows.map(|s| Ok(serde_json::from_str(&s?)?)).collect()
     }
     pub fn favorite(&self, track: &Track, add: bool) -> Result<()> {
+        let tx = self.db.unchecked_transaction()?;
         if add {
-            self.db.execute(
-                "INSERT OR REPLACE INTO favorites(key,track) VALUES(?1,?2)",
-                params![track.key(), serde_json::to_string(track)?],
+            tx.execute("DELETE FROM library_hidden WHERE key=?", [track.key()])?;
+            tx.execute(
+                "INSERT OR REPLACE INTO favorites(key,track,added) VALUES(?1,?2,?3)",
+                params![
+                    track.key(),
+                    serde_json::to_string(track)?,
+                    wedex_cloud::now_ms()
+                ],
             )?;
         } else {
-            self.db
-                .execute("DELETE FROM favorites WHERE key=?1", [track.key()])?;
-            self.db
-                .execute("DELETE FROM imported WHERE key=?1", [track.key()])?;
+            tx.execute(
+                "INSERT OR REPLACE INTO library_hidden VALUES(?1,?2)",
+                params![track.key(), serde_json::to_string(track)?],
+            )?;
+            tx.execute("DELETE FROM favorites WHERE key=?1", [track.key()])?;
+            tx.execute("DELETE FROM imported WHERE key=?1", [track.key()])?;
         }
+        library::enqueue_active(&tx, track, add)?;
+        tx.commit()?;
         Ok(())
     }
     pub fn import_yandex(&self, tracks: &[Track]) -> Result<()> {
+        let existing = self
+            .favorites()?
+            .into_iter()
+            .map(|t| t.key())
+            .collect::<std::collections::HashSet<_>>();
         let tx = self.db.unchecked_transaction()?;
         tx.execute("DELETE FROM imported", [])?;
         for track in tracks {
@@ -231,6 +252,10 @@ impl Store {
                 "INSERT OR REPLACE INTO imported VALUES(?1,?2)",
                 params![track.key(), serde_json::to_string(track)?],
             )?;
+            if !existing.contains(&track.key()) && !library::hidden(&tx, &track.key())? {
+                library::enqueue_active(&tx, track, true)?;
+                tx.execute("INSERT OR IGNORE INTO favorites(key,track) SELECT ?1,?2 WHERE EXISTS(SELECT 1 FROM library_active)",params![track.key(),serde_json::to_string(track)?])?;
+            }
         }
         tx.commit()?;
         Ok(())

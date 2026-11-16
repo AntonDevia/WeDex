@@ -1,5 +1,6 @@
 mod connections_sync;
 mod hitmo;
+mod library_sync;
 mod listening;
 #[cfg(windows)]
 pub mod vps;
@@ -48,6 +49,9 @@ pub enum Action {
 }
 #[derive(Clone, Default)]
 pub struct View {
+    pub library_enabled: bool,
+    pub library_pending: bool,
+    pub library_syncing: bool,
     pub transport_pending: bool,
     pub server_updating: bool,
     pub sync_status: String,
@@ -100,6 +104,7 @@ impl Updater {
     }
 }
 pub struct Cloud {
+    library: library_sync::Sync,
     owner: Option<wedex_cloud::admin::Owner>,
     transport: Option<Transport>,
     hitmo: hitmo::Discovery,
@@ -215,6 +220,7 @@ impl Cloud {
     pub fn new(preview: bool) -> Self {
         let (sender, receiver) = mpsc::channel();
         let mut cloud = Self {
+            library: Default::default(),
             owner: None,
             transport: None,
             last_update: Instant::now(),
@@ -256,6 +262,7 @@ impl Cloud {
         self.view.status = "Что-то пошло не так".into();
     }
     fn attach(&mut self, mut connection: Connection, save: bool) -> anyhow::Result<()> {
+        self.library = Default::default();
         self.transport = None;
         self.view.transport_pending = false;
         self.hitmo = Default::default();
@@ -904,6 +911,8 @@ impl Cloud {
         for event in events {
             match event {
                 client::Event::Connected => {
+                    self.library.inflight = None;
+                    self.library.dirty = true;
                     if let Some(owner) = self.remote_owner() {
                         let sender = self.sender.clone();
                         let endpoint = owner.endpoint.clone();
@@ -919,6 +928,8 @@ impl Cloud {
                     self.last_publish = now - Duration::from_secs(2);
                 }
                 client::Event::Disconnected => {
+                    self.library.inflight = None;
+                    self.view.library_syncing = false;
                     self.view.connected = false;
                     self.view.status = "Сервер недоступен · переподключение…".into();
                     for device in &mut self.view.devices {
@@ -945,6 +956,16 @@ impl Cloud {
                         .into();
                     self.view.server_version = version;
                     self.view.capabilities = capabilities;
+                }
+                client::Event::Message(ServerMessage::LibraryChanged { .. }) => {
+                    self.library.dirty = true;
+                }
+                client::Event::Message(ServerMessage::LibraryDelta { delta }) => {
+                    if let Some(store) = store {
+                        if let Err(e) = self.library_delta(store, &delta) {
+                            self.error(e);
+                        }
+                    }
                 }
                 client::Event::Message(ServerMessage::VaultSnapshot { entries }) => {
                     if let Some(connection) = &self.connection {
@@ -1079,6 +1100,11 @@ impl Cloud {
                     self.error(anyhow::anyhow!(message))
                 }
                 _ => {}
+            }
+        }
+        if let Some(store) = store {
+            if let Err(e) = self.library_tick(store, now) {
+                self.error(e);
             }
         }
         if self.client.as_ref().is_some_and(Client::connected) {

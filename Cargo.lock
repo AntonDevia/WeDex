@@ -6072,7 +6072,7 @@ dependencies = [
 
 [[package]]
 name = "wedex"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "android_logger",
  "anyhow",
@@ -6112,7 +6112,7 @@ dependencies = [
 
 [[package]]
 name = "wedex-cloud"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -6133,6 +6133,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-tungstenite 0.26.2",
+ "url",
  "uuid",
  "wedex-update",
 ]

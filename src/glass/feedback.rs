@@ -185,6 +185,33 @@ pub(super) fn paint(ui: &mut GlassUi, ctx: &egui::Context, m: &Model, p: &Painte
             ring(p, pos2(rect.right() - 82., rect.top() + 36.), 10., now, ink);
         }
     }
+    if ui.cloud_view.library_enabled && ui.page == Page::Library && !ui.zen && ui.overlay.is_none()
+    {
+        let center = pos2(ui.layout.main_x + 164., 68.);
+        ui.renderer.regions.insert(
+            "Library sync indicator".into(),
+            (
+                Rect::from_center_size(center, vec2(24., 24.)),
+                p.clip_rect(),
+            ),
+        );
+        if ui.cloud_view.library_syncing {
+            ring(p, center, 8., now, ink.gamma_multiply(0.8));
+        } else if ui.cloud_view.library_pending || !ui.cloud_view.connected {
+            p.circle_stroke(center, 7., Stroke::new(1.6_f32, ink.gamma_multiply(0.6)));
+            p.line_segment([center + vec2(0., -4.), center], Stroke::new(1.6_f32, ink));
+            p.line_segment([center, center + vec2(3., 1.)], Stroke::new(1.6_f32, ink));
+        } else {
+            p.add(Shape::line(
+                vec![
+                    center + vec2(-5., 0.),
+                    center + vec2(-1., 4.),
+                    center + vec2(6., -4.),
+                ],
+                Stroke::new(1.8_f32, ink.gamma_multiply(0.7)),
+            ));
+        }
+    }
     let disconnected = m.network != crate::network::State::Online
         || m.settings.offline_only
         || ui

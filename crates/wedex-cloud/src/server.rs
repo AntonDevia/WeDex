@@ -507,11 +507,12 @@ async fn connection(mut socket: WebSocket, hub: Arc<Hub>) {
             capabilities: if crate::update::enabled() {
                 vec![
                     "connections-vault".into(),
+                    "library-sync-v1".into(),
                     "server-update".into(),
                     "device-server-update".into(),
                 ]
             } else {
-                vec!["connections-vault".into()]
+                vec!["connections-vault".into(), "library-sync-v1".into()]
             },
             device_id: id.clone(),
             api_version: API_VERSION,
@@ -644,6 +645,30 @@ async fn update_status(
 }
 fn receive(hub: &Hub, device: &Device, message: ClientMessage) -> Result<Option<ServerMessage>> {
     match message {
+        ClientMessage::LibrarySync { cursor, operations } => {
+            anyhow::ensure!(device.can_play, "Только нативные устройства");
+            let delta = hub.db.library_sync(&device.id, cursor, &operations)?;
+            if !operations.is_empty() {
+                for peer in hub
+                    .connected
+                    .lock()
+                    .unwrap()
+                    .values()
+                    .filter(|c| c.device.can_play)
+                {
+                    let _ = peer.outgoing.try_send(ServerMessage::LibraryChanged {
+                        revision: delta
+                            .entries
+                            .iter()
+                            .map(|e| e.version)
+                            .chain(delta.acknowledged.iter().map(|a| a.entry.version))
+                            .max()
+                            .unwrap_or(delta.cursor),
+                    });
+                }
+            }
+            Ok(Some(ServerMessage::LibraryDelta { delta }))
+        }
         ClientMessage::VaultGet => {
             anyhow::ensure!(device.can_play, "Только нативные устройства");
             Ok(Some(ServerMessage::VaultSnapshot {

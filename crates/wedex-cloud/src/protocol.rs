@@ -261,18 +261,41 @@ impl Invitation {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientMessage {
+    LibrarySync {
+        cursor: u64,
+        operations: Vec<crate::library::Operation>,
+    },
     VaultGet,
-    VaultSet { entries: Vec<crate::vault::Entry> },
-    Authenticate { token: String },
-    Publish { playback: Playback },
-    Command { command: RemoteCommand },
-    Acknowledge { id: String, error: Option<String> },
-    Sessions { sessions: Vec<Session> },
+    VaultSet {
+        entries: Vec<crate::vault::Entry>,
+    },
+    Authenticate {
+        token: String,
+    },
+    Publish {
+        playback: Playback,
+    },
+    Command {
+        command: RemoteCommand,
+    },
+    Acknowledge {
+        id: String,
+        error: Option<String>,
+    },
+    Sessions {
+        sessions: Vec<Session>,
+    },
     Ping,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerMessage {
+    LibraryDelta {
+        delta: crate::library::Delta,
+    },
+    LibraryChanged {
+        revision: u64,
+    },
     VaultSnapshot {
         entries: Vec<crate::vault::Entry>,
     },

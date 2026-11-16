@@ -1676,6 +1676,14 @@ impl App {
                 },
                 self.store.as_ref(),
             );
+            if self.cloud.take_library_change() {
+                if let Some(store) = &self.store {
+                    match store.favorites() {
+                        Ok(tracks) => self.favorites = tracks,
+                        Err(e) => self.report_error("library-sync", e.to_string()),
+                    }
+                }
+            }
             for delivery in deliveries {
                 let error = self.remote_action(delivery.command.action.clone()).err();
                 self.cloud.acknowledge(&delivery, error);

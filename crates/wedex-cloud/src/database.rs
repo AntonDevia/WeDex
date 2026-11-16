@@ -3,6 +3,7 @@ use anyhow::{ensure, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 use sha2::{Digest, Sha256};
 use std::{path::Path, sync::Mutex};
+mod library;
 
 pub(crate) fn digest(value: &str) -> String {
     format!("{:x}", Sha256::digest(value.as_bytes()))
@@ -35,6 +36,10 @@ impl Database {
                 artist TEXT NOT NULL, started INTEGER NOT NULL, listened INTEGER NOT NULL);
             CREATE INDEX IF NOT EXISTS session_track ON sessions(track_key);
             CREATE TABLE IF NOT EXISTS connection_vault(name TEXT PRIMARY KEY,clock INTEGER NOT NULL,writer TEXT NOT NULL,encrypted TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS library_clock(id INTEGER PRIMARY KEY CHECK(id=1),revision INTEGER NOT NULL);
+            INSERT OR IGNORE INTO library_clock VALUES(1,0);
+            CREATE TABLE IF NOT EXISTS library_items(key TEXT PRIMARY KEY,track TEXT NOT NULL,liked INTEGER NOT NULL,version INTEGER UNIQUE NOT NULL,removed INTEGER NOT NULL,added INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS library_operations(id TEXT PRIMARY KEY,device TEXT NOT NULL,key TEXT NOT NULL,digest TEXT NOT NULL,causal INTEGER NOT NULL);
             PRAGMA user_version=1;")?;
         Ok(Self(Mutex::new(db)))
     }
