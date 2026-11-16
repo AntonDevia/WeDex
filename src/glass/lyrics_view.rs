@@ -15,8 +15,7 @@ pub(super) fn show_in(
     if ui.lyrics_manual_layout != Some((zen, size)) {
         ui.lyrics_manual_layout = Some((zen, size));
         ui.lyrics_manual_until = -1.;
-        ui.lyrics_manual_index = None;
-        ui.lyrics_wheel_remainder = 0.;
+        ui.lyrics_manual_offset = None;
         ui.lyrics_manual_visibility = transitions::Tween::new(0.);
         ui.lyrics_motion = Default::default();
     }
@@ -145,10 +144,9 @@ pub(super) fn show_in(
                         .contains(p)
                     })
                 });
-            // Consume physical wheel events, not egui's inertial pixel tail.
-            // Precision devices accumulate fractional rows without ever
-            // leaving the text parked between two lyric lines.
-            let rows = if hovered {
+            // Preserve fractional pixel motion without snapping to lyric rows
+            // or adding an artificial interpolation tail to wheel input.
+            let movement = if hovered {
                 ctx.input(|i| {
                     i.events
                         .iter()
@@ -156,35 +154,21 @@ pub(super) fn show_in(
                             egui::Event::MouseWheel { unit, delta, .. } if delta.y != 0. => Some(
                                 -delta.y
                                     * match unit {
-                                        egui::MouseWheelUnit::Line => 1.,
-                                        egui::MouseWheelUnit::Point => 1. / 40.,
-                                        egui::MouseWheelUnit::Page => {
-                                            (content.height / (base_font * 1.9)).max(1.)
-                                        }
+                                        egui::MouseWheelUnit::Line => 40.,
+                                        egui::MouseWheelUnit::Point => 1.,
+                                        egui::MouseWheelUnit::Page => content.height * 0.85,
                                     },
                             ),
                             _ => None,
                         })
                         .sum::<f32>()
-                }) - ui.touch_delta / 40.
+                }) - ui.touch_delta
             } else {
                 0.
             };
-            if rows != 0. {
+            if movement != 0. {
                 if now >= ui.lyrics_manual_until {
-                    ui.lyrics_manual_index = Some(active);
-                    ui.lyrics_wheel_remainder = 0.;
-                }
-                ui.lyrics_wheel_remainder += rows;
-                let steps = ui.lyrics_wheel_remainder.trunc() as isize;
-                ui.lyrics_wheel_remainder -= steps as f32;
-                let index = ui.lyrics_manual_index.unwrap_or(active);
-                let next = index
-                    .saturating_add_signed(steps)
-                    .min(lyrics.lines.len() - 1);
-                ui.lyrics_manual_index = Some(next);
-                if (next == 0 && rows < 0.) || (next + 1 == lyrics.lines.len() && rows > 0.) {
-                    ui.lyrics_wheel_remainder = 0.;
+                    ui.lyrics_manual_offset = None;
                 }
                 ui.lyrics_manual_until = now + 3.;
             }
@@ -237,9 +221,13 @@ pub(super) fn show_in(
                 nodes.push(n);
             }
             if manual {
-                if let Some(n) = ui.lyrics_manual_index.and_then(|index| nodes.get(index)) {
-                    target = n.y + n.height * 0.25 - content.height * 0.43;
-                }
+                let center = |n: &Node| n.y + n.height * 0.25 - content.height * 0.43;
+                let min = nodes.first().map(center).unwrap_or(0.);
+                let max = nodes.last().map(center).unwrap_or(min);
+                let initial = nodes.get(active).map(center).unwrap_or(min);
+                let offset = ui.lyrics_manual_offset.get_or_insert(initial);
+                *offset = (*offset + movement).clamp(min, max);
+                target = *offset;
             }
             let scroll = ui
                 .lyrics_motion

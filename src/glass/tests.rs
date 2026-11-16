@@ -758,18 +758,7 @@ fn wheel_browses_synced_lyrics_uniformly_then_resumes_the_current_line_after_thr
             ],
         );
         let until = h.ui.lyrics_manual_until;
-        assert_eq!(h.ui.lyrics_manual_index, Some(26));
-        let root = h.ui.last_root.as_ref().unwrap();
-        let content = root.find("Lyrics content").unwrap();
-        let selected = content
-            .children
-            .iter()
-            .find(|n| matches!(n.command, Some(Control::LyricSeek(t)) if t == 130.))
-            .unwrap();
-        assert!(
-            (selected.y + selected.height * 0.25 - content.height * 0.43).abs() < 0.01,
-            "the complete row snaps into place in the input frame"
-        );
+        assert!(h.ui.lyrics_manual_offset.is_some());
         let immediate = h.ui.lyrics_motion.at(h.time);
         assert!((until - h.time - 3.).abs() < 0.001);
         for _ in 0..10 {
@@ -830,7 +819,7 @@ fn wheel_browses_synced_lyrics_uniformly_then_resumes_the_current_line_after_thr
 }
 
 #[test]
-fn lyric_row_scroll_handles_wrapped_lines_precision_wheels_and_both_boundaries() {
+fn lyric_pixel_scroll_preserves_precision_across_wrapped_lines_and_both_boundaries() {
     for zen in [true] {
         let mut m = fixture();
         m.settings.lyrics_enabled = true;
@@ -866,12 +855,13 @@ fn lyric_row_scroll_handles_wrapped_lines_precision_wheels_and_both_boundaries()
             ]
         };
         h.frame(&m, wheel(egui::MouseWheelUnit::Line, 100.));
-        assert_eq!(h.ui.lyrics_manual_index, Some(0));
-        for index in 0..4 {
-            h.frame(&m, wheel(egui::MouseWheelUnit::Point, -10.));
-            assert_eq!(
-                h.ui.lyrics_manual_index,
-                Some(if index == 3 { 1 } else { 0 })
+        let start = h.ui.lyrics_motion.at(h.time);
+        for distance in [3.25, 7.5, 10., 21.] {
+            let before = h.ui.lyrics_motion.at(h.time);
+            h.frame(&m, wheel(egui::MouseWheelUnit::Point, -distance));
+            assert!(
+                (h.ui.lyrics_motion.at(h.time) - before - distance).abs() < 0.01,
+                "small wheel deltas move immediately by pixels instead of accumulating a row"
             );
         }
         let root = h.ui.last_root.as_ref().unwrap();
@@ -882,13 +872,17 @@ fn lyric_row_scroll_handles_wrapped_lines_precision_wheels_and_both_boundaries()
             .find(|n| matches!(n.command, Some(Control::LyricSeek(t)) if t == 5.))
             .unwrap();
         assert!(wrapped.height > wrapped.line_height["value"].as_f64().unwrap() as f32);
-        assert!((wrapped.y + wrapped.height * 0.25 - content.height * 0.43).abs() < 0.01);
+        let before = h.ui.lyrics_motion.at(h.time);
         h.frame(&m, wheel(egui::MouseWheelUnit::Line, -1.));
-        assert_eq!(h.ui.lyrics_manual_index, Some(2));
+        assert!((h.ui.lyrics_motion.at(h.time) - before - 40.).abs() < 0.01);
         h.frame(&m, wheel(egui::MouseWheelUnit::Line, -100.));
-        assert_eq!(h.ui.lyrics_manual_index, Some(11));
+        let end = h.ui.lyrics_motion.at(h.time);
+        h.frame(&m, wheel(egui::MouseWheelUnit::Page, -10.));
+        assert!((h.ui.lyrics_motion.at(h.time) - end).abs() < 0.01);
         h.frame(&m, wheel(egui::MouseWheelUnit::Line, 1.));
-        assert_eq!(h.ui.lyrics_manual_index, Some(10));
+        assert!((h.ui.lyrics_motion.at(h.time) - end + 40.).abs() < 0.01);
+        h.frame(&m, wheel(egui::MouseWheelUnit::Page, 100.));
+        assert!((h.ui.lyrics_motion.at(h.time) - start).abs() < 0.01);
         assert_eq!(m.status.position, 0.);
     }
 }

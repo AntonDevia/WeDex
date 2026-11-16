@@ -263,8 +263,7 @@ pub struct GlassUi {
     #[cfg(windows)]
     vps_editor: vps::Editor,
     lyrics_manual_until: f64,
-    lyrics_manual_index: Option<usize>,
-    lyrics_wheel_remainder: f32,
+    lyrics_manual_offset: Option<f32>,
     lyrics_manual_visibility: transitions::Tween,
     lyrics_manual_layout: Option<(bool, egui::Vec2)>,
     buttons: transitions::Buttons,
@@ -358,8 +357,7 @@ impl GlassUi {
             #[cfg(windows)]
             vps_editor: Default::default(),
             lyrics_manual_until: -1.,
-            lyrics_manual_index: None,
-            lyrics_wheel_remainder: 0.,
+            lyrics_manual_offset: None,
             lyrics_manual_visibility: transitions::Tween::new(0.),
             lyrics_manual_layout: None,
             buttons: Default::default(),
@@ -2321,8 +2319,7 @@ impl GlassUi {
         let lyrics_track = m.status.track.as_ref().map(Track::key);
         if lyrics_track != self.lyrics_track {
             self.lyrics_manual_until = -1.;
-            self.lyrics_manual_index = None;
-            self.lyrics_wheel_remainder = 0.;
+            self.lyrics_manual_offset = None;
             self.lyrics_manual_visibility = transitions::Tween::new(0.);
             self.lyrics_fitted_font = None;
             self.lyrics_motion = Default::default();
