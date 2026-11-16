@@ -1778,6 +1778,15 @@ impl App {
     }
     fn local_action(&mut self, action: Intent) {
         match action {
+            Intent::ToggleFavoriteDownloads => {
+                if self.downloads.busy() {
+                    self.downloads.cancel();
+                } else if self.settings.offline_only {
+                    self.message = "Для скачивания выключите офлайн-режим".into();
+                } else {
+                    self.downloads.download(self.favorites.clone());
+                }
+            }
             Intent::Download(tracks) => {
                 if self.settings.offline_only {
                     self.message = "Для скачивания выключите офлайн-режим".into();
@@ -1787,13 +1796,8 @@ impl App {
                 }
             }
             Intent::RemoveDownload(track) => self.downloads.remove(track),
-            Intent::CancelDownloads => self.downloads.cancel(),
             Intent::CacheAuto(auto) => {
                 self.settings.cache_auto = auto;
-                self.persist();
-            }
-            Intent::CacheLimit(mb) => {
-                self.settings.cache_limit_mb = mb.clamp(256, 16384);
                 self.persist();
             }
             Intent::OfflineOnly(offline) => {
@@ -2299,6 +2303,21 @@ impl eframe::App for App {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn favorite_download_button_toggles_the_local_collection_without_changing_playback() {
+        let mut app = App::with_context(&egui::Context::default(), Some("favorites".into()));
+        app.settings.offline_only = false;
+        app.queue = vec![crate::model::tests::track("Not a favorite", "Artist", 200)];
+        let expected = app.favorites.iter().map(Track::key).collect::<Vec<_>>();
+        assert!(!expected.is_empty());
+        app.local_action(Intent::ToggleFavoriteDownloads);
+        assert_eq!(*app.downloads.view.downloading, expected);
+        assert!(app.downloads.view.busy);
+        app.local_action(Intent::ToggleFavoriteDownloads);
+        assert!(app.downloads.view.downloading.is_empty());
+        assert!(!app.downloads.view.busy);
+        assert_eq!(app.queue[0].title, "Not a favorite");
+    }
     #[test]
     fn phone_main_player_controls_pc_over_real_tls_without_changing_local_audio() {
         let _mobile = crate::platform::mobile_for_test();

@@ -160,18 +160,15 @@ impl Disk {
                 .iter()
                 .any(|e| e.track.key() == track.key() && e.pinned);
         entries.retain(|e| e.track.key() != track.key());
-        let mut total = entries.iter().map(|e| e.size).sum::<u64>() + bytes.len() as u64;
+        // The budget belongs only to disposable listening cache. Explicit
+        // downloads are retained independently and have no collection quota.
+        let mut total = entries
+            .iter()
+            .filter(|e| !e.pinned)
+            .map(|e| e.size)
+            .sum::<u64>()
+            + if pinned { 0 } else { bytes.len() as u64 };
         entries.sort_by_key(|e| e.accessed);
-        ensure!(
-            entries
-                .iter()
-                .filter(|e| e.pinned)
-                .map(|e| e.size)
-                .sum::<u64>()
-                + bytes.len() as u64
-                <= self.limit,
-            "Лимит хранилища занят скачанными треками. Увеличьте его в настройках"
-        );
         for old in entries.iter().filter(|e| !e.pinned) {
             if total <= self.limit {
                 break;
@@ -301,7 +298,7 @@ mod tests {
         let path = std::env::temp_dir().join(format!("wedex-cache-test-{}", uuid::Uuid::new_v4()));
         let disk = Disk {
             root: path.clone(),
-            limit: 220,
+            limit: 150,
         };
         let a = crate::model::tests::track("Pinned", "Artist", 10);
         let b = crate::model::tests::track("Temporary", "Artist", 10);
@@ -318,8 +315,16 @@ mod tests {
         assert_eq!(disk.entries().len(), 1);
         let mut larger = bytes.clone();
         larger.resize(150, 0);
-        assert!(disk.save(&b, Provider::Hitmotop, &larger, true).is_err());
+        disk.save(&b, Provider::Hitmotop, &larger, true).unwrap();
+        assert_eq!(disk.entries().iter().map(|e| e.size).sum::<u64>(), 250);
+        disk.save(&c, Provider::Hitmotop, &bytes, false).unwrap();
+        assert!(disk.read(&a).is_some());
+        assert!(disk.read(&b).is_some());
+        assert!(disk.read(&c).is_some());
+        disk.clear_temporary().unwrap();
+        assert_eq!(disk.entries().len(), 2);
         disk.remove(&a).unwrap();
+        disk.remove(&b).unwrap();
         std::fs::remove_dir(path).unwrap();
     }
     #[test]

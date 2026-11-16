@@ -171,8 +171,8 @@ pub(super) fn paint(ui: &mut GlassUi, ctx: &egui::Context, m: &Model, p: &Painte
         }
     }
     if m.downloads.busy {
-        if let Some(rect) = region(ui, "Open downloads") {
-            ring(p, rect.center(), 15., now, ink);
+        if let Some(rect) = region(ui, "Favorite downloads") {
+            ring(p, rect.center(), 15., now, Color32::from_rgb(30, 28, 34));
         }
     }
     if m.loading_library {

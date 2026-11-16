@@ -169,7 +169,7 @@ fn section(p: &mut Node, value: &str, y: f32) {
 }
 pub(super) fn settings(ui: &mut GlassUi, m: &Model) -> Node {
     let (mut root, mut p) = panel(ui, "Настройки", 720., 760.);
-    let mut viewport = body(ui, &p, 944.);
+    let mut viewport = body(ui, &p, 996.);
     let b = &mut viewport.children[0];
     let w = b.width;
     section(b, "Аккаунт и сервисы", 0.);
@@ -334,7 +334,7 @@ pub(super) fn settings(ui: &mut GlassUi, m: &Model) -> Node {
     b.children.push(text(
         &format!("WeDex · версия {}", env!("CARGO_PKG_VERSION")),
         4.,
-        906.,
+        958.,
         w,
         12.,
         false,
@@ -368,13 +368,22 @@ pub(super) fn settings(ui: &mut GlassUi, m: &Model) -> Node {
         false,
     ));
     b.children.push(button(
-        "Скачанное и офлайн-режим",
+        "Автоматически сохранять прослушанное",
         0.,
         814.,
         w,
         44.,
-        Control::Overlay(Overlay::Storage),
-        false,
+        Control::CacheAuto,
+        m.settings.cache_auto,
+    ));
+    b.children.push(button(
+        "Офлайн-режим",
+        0.,
+        866.,
+        w,
+        44.,
+        Control::OfflineOnly,
+        m.settings.offline_only,
     ));
     p.children.push(viewport);
     root.children.push(p);

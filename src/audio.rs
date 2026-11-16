@@ -199,6 +199,7 @@ const MAX_BUFFER: usize = 128 * 1024 * 1024;
 pub fn download_offline(track: &Track, services: &Services, cancel: Arc<AtomicU64>) -> Result<()> {
     let cache = crate::cache::global();
     if cache.read(track).is_some() {
+        anyhow::ensure!(cancel.load(Ordering::Relaxed) == 1, "Скачивание отменено");
         return cache.pin(track);
     }
     let recording = services.playback_recording(track)?;
@@ -213,6 +214,7 @@ pub fn download_offline(track: &Track, services: &Services, cancel: Arc<AtomicU6
         }
         match download_bytes(&recording, services, cancel.clone()) {
             Ok(bytes) => {
+                anyhow::ensure!(cancel.load(Ordering::Relaxed) == 1, "Скачивание отменено");
                 cache.save(track, recording.provider, &bytes, true)?;
                 cache.save_cover(track, &services.http);
                 return Ok(());

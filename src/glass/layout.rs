@@ -339,7 +339,7 @@ impl Layout {
                 );
                 let y = self.list_rect(key, old).min.y - 32.;
                 if n.name == "ИСТОЧНИК" {
-                    n.visible = self.main_width >= 500.;
+                    n.visible = false;
                     n.move_to(self.main_x + self.main_width - 148., y);
                     n.width = 100.;
                 } else {

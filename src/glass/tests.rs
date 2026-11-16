@@ -243,6 +243,101 @@ fn track_actions_download_without_starting_a_version_search() {
 }
 
 #[test]
+fn library_download_button_is_one_action_and_never_opens_a_storage_dialog() {
+    for size in [vec2(1440., 960.), vec2(411., 869.)] {
+        for page in [Page::Library, Page::Favorites] {
+            let mut m = fixture();
+            let mut h = Harness::new();
+            h.size = size;
+            h.ui.page = page;
+            h.frame(&m, vec![]);
+            let point = h.point(|c| matches!(c, Control::ToggleFavoriteDownloads), 0.5);
+            let actions = h.click(&m, point);
+            assert!(actions
+                .iter()
+                .any(|a| matches!(a, Intent::ToggleFavoriteDownloads)));
+            assert!(h.ui.overlay.is_none());
+            m.downloads.busy = true;
+            h.frame(&m, vec![]);
+            assert_eq!(
+                h.ui.last_root
+                    .as_ref()
+                    .unwrap()
+                    .find("Favorite downloads")
+                    .unwrap()
+                    .children[0]
+                    .asset
+                    .as_deref(),
+                Some("x")
+            );
+            let point = h.point(|c| matches!(c, Control::ToggleFavoriteDownloads), 0.5);
+            assert!(h
+                .click(&m, point)
+                .iter()
+                .any(|a| matches!(a, Intent::ToggleFavoriteDownloads)));
+            assert!(h.ui.overlay.is_none());
+        }
+    }
+}
+
+#[test]
+fn track_rows_hide_service_names_and_show_downloaded_badges_in_both_themes_and_sizes() {
+    for size in [vec2(1440., 960.), vec2(900., 600.), vec2(411., 869.)] {
+        for theme in [ThemePreference::Light, ThemePreference::Dark] {
+            let mut m = fixture();
+            m.settings.theme = theme;
+            m.favorites.truncate(2);
+            m.downloads.entries = std::sync::Arc::new(vec![crate::cache::Entry {
+                track: m.favorites[0].clone(),
+                source: Provider::Hitmotop,
+                size: 100,
+                digest: "synthetic".into(),
+                saved: 1,
+                accessed: 1,
+                pinned: true,
+            }]);
+            let mut h = Harness::new();
+            h.size = size;
+            h.ui.page = Page::Favorites;
+            h.frame(&m, vec![]);
+            let root = h.ui.last_root.as_ref().unwrap();
+            let rows = &root.find("list/favorites").unwrap().children;
+            for (index, track) in m.favorites.iter().enumerate() {
+                let row = rows
+                    .iter()
+                    .find(|n| matches!(&n.command,Some(Control::Play(t)) if t.key()==track.key()))
+                    .unwrap();
+                assert!(!row
+                    .children
+                    .iter()
+                    .any(|n| n.kind == "TEXT" && n.name == "Яндекс" && n.visible));
+                if index == 0 {
+                    let badge = row.find("Downloaded track").unwrap();
+                    let like = row.find("Save track").unwrap();
+                    assert!(badge.x + badge.width <= like.x - 8.);
+                    let labels = row.find("Track labels").unwrap();
+                    assert!(labels.x + labels.width <= badge.x - 8.);
+                } else {
+                    assert!(row.find("Downloaded track").is_none());
+                }
+            }
+            if let Some(header) = root.find("ИСТОЧНИК") {
+                assert!(!header.visible);
+            }
+            m.downloads.entries = Default::default();
+            h.frame(&m, vec![]);
+            assert!(h
+                .ui
+                .last_root
+                .as_ref()
+                .unwrap()
+                .find("Downloaded track")
+                .is_none());
+        }
+    }
+}
+
+#[test]
 fn synchronized_connections_preserve_the_open_player_panel() {
     let mut h = Harness::new();
     h.ui.overlay = Some(Overlay::Eq);

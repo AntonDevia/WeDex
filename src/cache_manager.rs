@@ -4,7 +4,7 @@ use crate::{
     providers::Services,
 };
 use std::{
-    collections::VecDeque,
+    collections::{HashSet, VecDeque},
     sync::{
         atomic::{AtomicU64, Ordering},
         mpsc::{self, Receiver, Sender},
@@ -15,7 +15,7 @@ use std::{
 
 enum Event {
     Listed(u64, Vec<cache::Entry>),
-    Downloaded(Arc<AtomicU64>, Result<(), String>),
+    Downloaded(Arc<AtomicU64>, Result<(), String>, bool),
     Changed(Result<(), String>),
 }
 pub struct Manager {
@@ -49,15 +49,40 @@ impl Manager {
         }
     }
     pub fn download(&mut self, tracks: Vec<Track>) {
-        self.dirty = true;
-        for track in tracks.into_iter().take(2000) {
+        let mut queued: HashSet<_> = self
+            .queue
+            .iter()
+            .map(Track::key)
+            .chain(self.active.iter().map(|(k, _)| k.clone()))
+            .collect();
+        let saved: HashSet<_> = self
+            .view
+            .entries
+            .iter()
+            .filter(|e| e.pinned && self.listed_revision == cache::revision())
+            .map(|e| e.track.key())
+            .collect();
+        for track in tracks {
             let key = track.key();
-            if !self.queue.iter().any(|t| t.key() == key)
-                && self.active.as_ref().is_none_or(|(k, _)| k != &key)
-            {
+            if !saved.contains(&key) && queued.insert(key) {
                 self.queue.push_back(track);
             }
         }
+        self.refresh_pending();
+    }
+    pub fn busy(&self) -> bool {
+        self.active.is_some() || !self.queue.is_empty()
+    }
+    fn refresh_pending(&mut self) {
+        self.view.downloading = Arc::new(
+            self.active
+                .iter()
+                .map(|(k, _)| k.clone())
+                .chain(self.queue.iter().map(Track::key))
+                .collect(),
+        );
+        self.view.busy = self.busy();
+        self.dirty = false;
     }
     pub fn cancel(&mut self) {
         self.queue.clear();
@@ -69,6 +94,26 @@ impl Manager {
         self.view.busy = false;
     }
     pub fn remove(&mut self, track: Option<Track>) {
+        if let Some(track) = &track {
+            let key = track.key();
+            self.queue.retain(|t| t.key() != key);
+            if self.active.as_ref().is_some_and(|(k, _)| k == &key) {
+                if let Some((_, token)) = self.active.take() {
+                    token.store(2, Ordering::Relaxed);
+                }
+            }
+            self.view.entries = Arc::new(
+                self.view
+                    .entries
+                    .iter()
+                    .filter(|e| e.track.key() != key)
+                    .cloned()
+                    .collect(),
+            );
+            self.view.bytes = self.view.entries.iter().map(|e| e.size).sum();
+            self.listed_revision = u64::MAX;
+            self.refresh_pending();
+        }
         let tx = self.tx.clone();
         std::thread::spawn(move || {
             let cache = cache::global();
@@ -87,12 +132,16 @@ impl Manager {
         while let Ok(e) = self.rx.try_recv() {
             match e {
                 Event::Listed(revision, entries) => {
-                    self.listed_revision = revision;
                     self.listing = false;
+                    if revision != cache::revision() {
+                        self.last = Instant::now() - Duration::from_secs(10);
+                        continue;
+                    }
+                    self.listed_revision = revision;
                     self.view.bytes = entries.iter().map(|e| e.size).sum();
                     self.view.entries = Arc::new(entries);
                 }
-                Event::Downloaded(token, result) => {
+                Event::Downloaded(token, result, storage_full) => {
                     self.dirty = true;
                     if self
                         .active
@@ -101,7 +150,7 @@ impl Manager {
                     {
                         self.active = None;
                         if let Err(e) = result {
-                            if e.contains("Лимит хранилища") {
+                            if storage_full {
                                 self.queue.clear();
                             }
                             self.errors.push(e);
@@ -126,22 +175,24 @@ impl Manager {
                 let token = Arc::new(AtomicU64::new(1));
                 self.active = Some((key.clone(), token.clone()));
                 std::thread::spawn(move || {
-                    let result = crate::audio::download_offline(&track, &service, token.clone())
-                        .map_err(|e| e.to_string());
-                    let _ = tx.send(Event::Downloaded(token, result));
+                    let result = crate::audio::download_offline(&track, &service, token.clone());
+                    let storage_full = result.as_ref().err().is_some_and(|e| {
+                        e.chain().any(|cause| {
+                            cause
+                                .downcast_ref::<std::io::Error>()
+                                .is_some_and(|e| e.kind() == std::io::ErrorKind::StorageFull)
+                        })
+                    });
+                    let _ = tx.send(Event::Downloaded(
+                        token,
+                        result.map_err(|e| format!("{e:#}")),
+                        storage_full,
+                    ));
                 });
             }
         }
         if self.dirty {
-            self.dirty = false;
-            self.view.downloading = Arc::new(
-                self.active
-                    .iter()
-                    .map(|(k, _)| k.clone())
-                    .chain(self.queue.iter().map(Track::key))
-                    .collect(),
-            );
-            self.view.busy = !self.view.downloading.is_empty();
+            self.refresh_pending();
         }
         if !self.listing
             && self.last.elapsed() > Duration::from_secs(3)
@@ -167,6 +218,40 @@ impl Drop for Manager {
 mod tests {
     use super::*;
     #[test]
+    fn whole_collection_is_queued_once_without_the_old_two_thousand_track_cap() {
+        let mut manager = Manager::new(true);
+        let tracks = (0..3005)
+            .map(|i| crate::model::tests::track(&format!("song-{i}"), "Artist", 180))
+            .collect::<Vec<_>>();
+        manager.download(tracks.clone());
+        manager.download(tracks);
+        assert_eq!(manager.view.downloading.len(), 3005);
+        assert!(manager.busy() && manager.view.busy);
+        manager.cancel();
+        assert!(manager.view.downloading.is_empty());
+        assert!(!manager.busy() && !manager.view.busy);
+    }
+    #[test]
+    fn storage_full_stops_the_remaining_queue_instead_of_retrying_every_track() {
+        let mut manager = Manager::new(false);
+        manager.listing = true;
+        let token = Arc::new(AtomicU64::new(1));
+        manager.active = Some(("active".into(), token.clone()));
+        manager.download(vec![crate::model::tests::track("pending", "Artist", 180)]);
+        manager
+            .tx
+            .send(Event::Downloaded(
+                token,
+                Err("synthetic storage full".into()),
+                true,
+            ))
+            .unwrap();
+        manager.tick(&Services::new(String::new(), String::new(), String::new()));
+        assert!(!manager.busy());
+        assert!(manager.view.downloading.is_empty());
+        assert_eq!(manager.errors.len(), 1);
+    }
+    #[test]
     fn cancelled_job_cannot_finish_a_new_download_of_the_same_track() {
         let mut manager = Manager::new(false);
         manager.last = Instant::now();
@@ -178,7 +263,11 @@ mod tests {
         manager.active = Some(("same-track".into(), current.clone()));
         manager
             .tx
-            .send(Event::Downloaded(old, Err("old cancelled failure".into())))
+            .send(Event::Downloaded(
+                old,
+                Err("old cancelled failure".into()),
+                false,
+            ))
             .unwrap();
         manager.tick(&Services::new(String::new(), String::new(), String::new()));
         assert!(Arc::ptr_eq(&manager.active.as_ref().unwrap().1, &current));

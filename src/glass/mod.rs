@@ -73,7 +73,6 @@ pub enum Page {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Overlay {
     TrackActions,
-    Storage,
     Updates,
     #[cfg(windows)]
     Vps,
@@ -92,11 +91,10 @@ pub enum Overlay {
 }
 #[derive(Clone)]
 pub enum Intent {
+    ToggleFavoriteDownloads,
     Download(Vec<Track>),
     RemoveDownload(Option<Track>),
-    CancelDownloads,
     CacheAuto(bool),
-    CacheLimit(u32),
     OfflineOnly(bool),
     Update(crate::updates::Action),
     Cloud(crate::cloud::Action),
@@ -140,13 +138,11 @@ pub enum Intent {
 }
 #[derive(Clone)]
 pub(super) enum Control {
+    ToggleFavoriteDownloads,
     Versions(Track),
-    OfflinePlay(usize),
     Download(Vec<Track>),
     RemoveDownload(Option<Track>),
-    CancelDownloads,
     CacheAuto,
-    CacheLimit(u32),
     OfflineOnly,
     Update(crate::updates::Action),
     #[cfg(windows)]
@@ -419,13 +415,12 @@ impl GlassUi {
             "search" | "results" => Page::Search,
             "artist" => Page::Artist,
             "library" => Page::Library,
-            "favorites" => Page::Favorites,
+            "favorites" | "downloads" => Page::Favorites,
             "playlists" => Page::Playlists,
             "playlist" => Page::Playlist,
             _ => Page::Sonora,
         };
         self.overlay = match name {
-            "downloads" => Some(Overlay::Storage),
             "track-actions" => {
                 self.action_track = demo_tracks().into_iter().next();
                 Some(Overlay::TrackActions)
@@ -505,54 +500,52 @@ impl GlassUi {
                 }
             }
         }
-        let short = match track.provider {
-            Provider::Yandex => "Яндекс",
-            Provider::Hitmotop => "Hitmo",
-            Provider::SoundCloud => "SoundCloud",
-            Provider::YouTube => "YouTube",
-            Provider::LastFm => "Last.fm",
-        };
-        let duration = if track.duration > 0 {
-            model::duration(track.duration)
-        } else {
-            "—:—".into()
-        };
-        // Preserve the component's right-aligned metadata and 12px gaps when
-        // source names and proportional duration digits change.
-        let source_width = match track.provider {
-            Provider::Yandex => 42.,
-            Provider::Hitmotop => 33.,
-            Provider::SoundCloud => 68.,
-            Provider::YouTube => 48.,
-            Provider::LastFm => 43.,
-        };
-        let digit_advances = [679., 365., 641., 630., 648., 624., 619., 596., 640., 619.];
-        let time_width = if track.duration > 0 {
-            (duration
-                .chars()
-                .map(|c| {
-                    c.to_digit(10)
-                        .map(|d| digit_advances[d as usize])
-                        .unwrap_or(265.)
-                })
-                .sum::<f32>()
-                * 0.012)
-                .ceil()
-        } else {
-            30.
-        };
-        let metadata = node.children.iter().any(|n| n.kind == "TEXT" && n.visible);
-        if metadata {
+        if node.find("Track labels").is_some() {
+            node.children
+                .retain(|n| n.name != "Яндекс" && n.name != "Downloaded track");
+            let saved = m
+                .downloads
+                .entries
+                .iter()
+                .any(|e| e.track.id == track.id && e.track.provider == track.provider);
+            let duration = if track.duration > 0 {
+                model::duration(track.duration)
+            } else {
+                "—:—".into()
+            };
+            let digit_advances = [679., 365., 641., 630., 648., 624., 619., 596., 640., 619.];
+            let time_width = if track.duration > 0 {
+                (duration
+                    .chars()
+                    .map(|c| {
+                        c.to_digit(10)
+                            .map(|d| digit_advances[d as usize])
+                            .unwrap_or(265.)
+                    })
+                    .sum::<f32>()
+                    * 0.012)
+                    .ceil()
+            } else {
+                30.
+            };
             let end = node
                 .children
                 .iter()
                 .find(|n| n.name == "Save track")
                 .map(|n| n.x - 12.)
-                .unwrap_or(node.width - 64.);
-            let time_x = end - time_width;
-            let source_x = time_x - 12. - source_width;
+                .unwrap_or(node.width - 12.);
+            let badge_x = end - 18.;
+            let metadata = node.children.iter().any(|n| n.kind == "TEXT" && n.visible);
+            let time_x = end - if saved { 30. } else { 0. } - time_width;
+            let label_end = if metadata {
+                time_x - 12.
+            } else if saved {
+                badge_x - 12.
+            } else {
+                end
+            };
             if let Some(labels) = node.find_mut("Track labels") {
-                labels.width = (source_x - 12. - labels.x).max(60.);
+                labels.width = (label_end - labels.x).max(32.);
                 let width = labels.width;
                 for text in &mut labels.children {
                     if text.kind == "TEXT" {
@@ -562,30 +555,34 @@ impl GlassUi {
             }
             for text in &mut node.children {
                 if text.kind == "TEXT" {
-                    let (x, width) = if text.name == "Яндекс" {
-                        (source_x, source_width)
-                    } else {
-                        (time_x, time_width)
-                    };
-                    text.move_to(x, text.y);
-                    text.width = width;
-                    text.natural_width = width;
+                    text.move_to(time_x, text.y);
+                    text.width = time_width;
+                    text.natural_width = time_width;
+                    text.characters = duration.clone();
+                    text.original_characters = duration.clone();
                 }
             }
-        }
-        for child in &mut node.children {
-            if child.kind == "TEXT" {
-                if child.name == "Яндекс" {
-                    child.characters = short.into();
-                } else {
-                    child.characters = duration.clone();
-                }
-                child.original_characters = child.characters.clone();
+            if saved {
+                let mut badge = panels::frame(
+                    "Downloaded track",
+                    badge_x,
+                    (node.height - 18.) / 2.,
+                    18.,
+                    18.,
+                );
+                badge.corner_radius = 9.;
+                badge.fills = vec![panels::fill([0.91, 1., 0.64], 1.)];
+                badge.children.push(panels::icon("download", 3.5, 3.5, 11.));
+                node.children.push(badge);
             }
         }
         if let Some(like) = node.find_mut("Save track") {
             like.command = Some(Control::Like(track.clone()));
-            if !m.preview && m.favorites.iter().any(|t| t.key() == track.key()) {
+            if !m.preview
+                && m.favorites
+                    .iter()
+                    .any(|t| t.id == track.id && t.provider == track.provider)
+            {
                 Self::tint(
                     like,
                     serde_json::json!({"r":232.0/255.0,"g":1.0,"b":163.0/255.0}),
@@ -1336,9 +1333,6 @@ impl GlassUi {
         if overlay == Overlay::Artists {
             return Some(search::artists_panel(self, m));
         }
-        if overlay == Overlay::Storage {
-            return Some(storage::panel(self, m));
-        }
         if overlay == Overlay::TrackActions {
             return Some(storage::track_actions(self, m));
         }
@@ -1350,7 +1344,6 @@ impl GlassUi {
         }
         let id = match overlay {
             Overlay::TrackActions => unreachable!(),
-            Overlay::Storage => unreachable!(),
             Overlay::Updates => unreachable!(),
             #[cfg(windows)]
             Overlay::Vps => unreachable!(),
@@ -1390,7 +1383,6 @@ impl GlassUi {
         Self::command(&mut root, "button/x", Control::Close);
         match overlay {
             Overlay::TrackActions => unreachable!(),
-            Overlay::Storage => unreachable!(),
             Overlay::Updates => unreachable!(),
             #[cfg(windows)]
             Overlay::Vps => unreachable!(),
@@ -1742,17 +1734,7 @@ impl GlassUi {
         size: egui::Vec2,
     ) {
         match control {
-            Control::OfflinePlay(index) => {
-                self.overlay = None;
-                out.push(Intent::PlayCollection(
-                    m.downloads
-                        .entries
-                        .iter()
-                        .map(|e| e.track.clone())
-                        .collect(),
-                    index,
-                ));
-            }
+            Control::ToggleFavoriteDownloads => out.push(Intent::ToggleFavoriteDownloads),
             Control::Download(tracks) => {
                 out.push(Intent::Download(tracks));
                 if self.overlay == Some(Overlay::TrackActions) {
@@ -1760,9 +1742,7 @@ impl GlassUi {
                 }
             }
             Control::RemoveDownload(track) => out.push(Intent::RemoveDownload(track)),
-            Control::CancelDownloads => out.push(Intent::CancelDownloads),
             Control::CacheAuto => out.push(Intent::CacheAuto(!m.settings.cache_auto)),
-            Control::CacheLimit(mb) => out.push(Intent::CacheLimit(mb)),
             Control::OfflineOnly => out.push(Intent::OfflineOnly(!m.settings.offline_only)),
             Control::Update(action) => out.push(Intent::Update(action)),
             #[cfg(windows)]
@@ -2395,21 +2375,16 @@ impl GlassUi {
         } else {
             self.layout.root(&mut root, self.page, scroll)
         };
-        if !self.zen
-            && matches!(
-                self.page,
-                Page::Library | Page::Favorites | Page::Playlists | Page::Playlist
-            )
-        {
+        if !self.zen && matches!(self.page, Page::Library | Page::Favorites) {
             let mut downloads = panels::icon_button(
-                "download",
+                if m.downloads.busy { "x" } else { "download" },
                 self.layout.size.x - self.layout.margin - 180.,
                 48.,
                 44.,
-                Control::Overlay(Overlay::Storage),
-                m.settings.offline_only,
+                Control::ToggleFavoriteDownloads,
+                m.downloads.busy,
             );
-            downloads.name = "Open downloads".into();
+            downloads.name = "Favorite downloads".into();
             root.children.push(downloads);
         }
         if !self.zen && !self.layout.mobile {
