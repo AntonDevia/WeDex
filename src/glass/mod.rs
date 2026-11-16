@@ -1,5 +1,6 @@
 //! Native, data-bound rendering of the approved Figma document.
 //! The bundled scene contains measured layers, never a rasterized screen.
+mod ambient;
 mod assets;
 mod blur;
 mod cloud;

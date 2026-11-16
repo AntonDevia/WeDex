@@ -41,6 +41,7 @@ pub struct Renderer {
     pub hits: Vec<Hit>,
     pub regions: HashMap<String, (Rect, Rect)>,
     pub ambient_phase: f32,
+    ambient_size: egui::Vec2,
     backdrop: super::blur::Backdrop,
     groups: super::composite::Groups,
     group_depth: usize,
@@ -503,7 +504,10 @@ impl Renderer {
         if !n.visible || n.opacity <= 0. {
             return;
         }
-        let mut t = if root { parent } else { parent.child(n) };
+        let t = if root { parent } else { parent.child(n) };
+        if n.name == "Ambient light" {
+            self.ambient_size = vec2(n.width, n.height);
+        }
         self.regions
             .insert(n.name.clone(), (t.bounds(n.width, n.height), p.clip_rect()));
         let alpha = opacity * if isolated { 1. } else { n.opacity };
@@ -516,17 +520,25 @@ impl Renderer {
                 .next()
                 .and_then(|s| s.parse::<usize>().ok())
                 .unwrap_or(0);
-            // Endpoint values are the original WeDex/Ambient Bloom variant.
-            let ends = [
-                (440., 70., 880., 690., [215., 47., 35.]),
-                (850., 130., 650., 700., [232., 171., 37.]),
-                (200., 650., 1000., 520., [147., 45., 68.]),
-                (330., -120., 760., 550., [88., 35., 49.]),
-            ];
-            let (x, y, w, h, end_color) = ends[i.min(3)];
-            let q = vec2(x - n.x, y - n.y) * phase * t.scale();
-            t.x += q.x;
-            t.y += q.y;
+            let (bloom, end_color) = super::ambient::bloom(
+                Rect::from_min_size(pos2(n.x, n.y), vec2(n.width, n.height)),
+                i,
+                phase,
+                self.ambient_size,
+            );
+            let origin = parent.point(bloom.left(), bloom.top());
+            let geometry = Transform {
+                x: origin.x,
+                y: origin.y,
+                ..parent
+            };
+            self.regions.insert(
+                n.name.clone(),
+                (
+                    geometry.bounds(bloom.width(), bloom.height()),
+                    p.clip_rect(),
+                ),
+            );
             if let Some((texture, texture_size, pad)) = self.blob(p.ctx(), n) {
                 let color = &n.fills[0]["gradientStops"][0]["color"];
                 let component = |name: &str, end: f32| {
@@ -539,19 +551,20 @@ impl Renderer {
                     component("b", end_color[2]),
                 )
                 .gamma_multiply(alpha);
-                let origin = t.point(-pad, -pad);
+                let padding = vec2(
+                    pad * bloom.width() / n.width,
+                    pad * bloom.height() / n.height,
+                );
+                let origin = parent.point(bloom.left() - padding.x, bloom.top() - padding.y);
                 let tr = Transform {
                     x: origin.x,
                     y: origin.y,
-                    ..t
+                    ..parent
                 };
                 textured(
                     p,
                     tr,
-                    vec2(
-                        n.width + (w - n.width) * phase + 2. * pad,
-                        n.height + (h - n.height) * phase + 2. * pad,
-                    ),
+                    bloom.size() + padding * 2.,
                     0.,
                     texture,
                     texture_size,

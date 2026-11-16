@@ -384,7 +384,10 @@ async fn public_certificate_discovery_and_pinned_login_work_without_transmitting
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(found.certificate, server.certificate);
+    assert!(client::accounts::same_certificate(
+        &found.certificate,
+        &server.certificate
+    ));
     assert_eq!(found.fingerprint().unwrap().len(), 95);
     let request = Login {
         username: "probe-user".into(),

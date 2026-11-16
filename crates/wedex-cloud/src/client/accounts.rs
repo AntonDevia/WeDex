@@ -188,10 +188,11 @@ pub fn blocking_account(
                 server.endpoint,
                 if register { "register" } else { "login" }
             ));
-            if let Some(c) = previous.filter(|c| {
+            let previous = previous.filter(|c| {
                 c.endpoint == server.endpoint
                     && same_certificate(&c.certificate, &server.certificate)
-            }) {
+            });
+            if let Some(c) = &previous {
                 post = post.bearer_auth(&c.credentials.token);
             }
             let response = post.json(&request).send().await?;
@@ -213,7 +214,20 @@ pub fn blocking_account(
             Ok(Connection {
                 sync_key: Some(response.sync_key),
                 endpoint: server.endpoint,
-                certificate: server.certificate,
+                // Legacy local cursors used the exact PEM bytes as identity.
+                // Preserve them while claiming an existing installation.
+                certificate: if response
+                    .credentials
+                    .account
+                    .as_ref()
+                    .is_some_and(|a| a.id == "legacy")
+                {
+                    previous
+                        .map(|c| c.certificate)
+                        .unwrap_or(server.certificate)
+                } else {
+                    server.certificate
+                },
                 credentials: response.credentials,
             })
         })

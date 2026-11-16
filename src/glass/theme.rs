@@ -4,7 +4,7 @@ use serde_json::{json, Value};
 pub fn apply(root: &mut Node, dark: bool) {
     root.visit(&mut |n| {
         if n.name == "Ambient light" {
-            n.opacity = 0.22;
+            n.opacity = 0.42;
             n.fills = vec![solid([0.976, 0.973, 0.965], 1.)];
         }
         if n.name == "Click outside to close" {
@@ -118,7 +118,7 @@ fn apply_dark(n: &mut Node, on_accent: bool) {
         }
     }
     if n.name == "Ambient light" {
-        n.opacity = 0.40;
+        n.opacity = 0.68;
     }
     if n.name == "Content surface" {
         n.fills = vec![solid([0.075, 0.068, 0.088], 0.74)];
