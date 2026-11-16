@@ -2,8 +2,6 @@ mod connections_sync;
 mod hitmo;
 mod library_sync;
 mod listening;
-#[cfg(windows)]
-pub mod vps;
 use crate::{
     audio,
     model::Track,
@@ -16,33 +14,25 @@ use std::{
 };
 use wedex_cloud::{
     client::{self, Client, Connection},
-    server::{self, RunningServer},
     *,
 };
 
 #[derive(Clone)]
 pub enum Action {
-    UpdateServer,
-    #[cfg(windows)]
-    Provision(Box<wedex_provision::Request>),
-    #[cfg(windows)]
-    ProvisionTrust(bool),
-    #[cfg(windows)]
-    ProvisionCancel,
-    #[cfg(windows)]
-    ProvisionReset,
-    Start {
-        lan: bool,
+    Discover(String),
+    TrustServer,
+    Account {
+        username: String,
+        password: String,
+        name: String,
+        register: bool,
     },
-    Stop,
     Connect {
         invitation: String,
         name: String,
     },
     Disconnect,
-    Invite {
-        browser: bool,
-    },
+    Invite,
     Revoke(String),
     Target(String),
     Remote(wedex_cloud::Action),
@@ -53,22 +43,17 @@ pub struct View {
     pub library_pending: bool,
     pub library_syncing: bool,
     pub transport_pending: bool,
-    pub server_updating: bool,
     pub sync_status: String,
     pub server_version: String,
     pub capabilities: Vec<String>,
-    #[cfg(windows)]
-    pub vps: vps::View,
-    pub owner_access: bool,
-    pub can_update_server: bool,
-    pub server_running: bool,
+    pub server_identity: Option<client::accounts::ServerIdentity>,
+    pub server_trusted: bool,
+    pub account_name: String,
     pub busy: bool,
     pub connected: bool,
     pub status: String,
     pub endpoint: String,
-    pub lan_endpoint: Option<String>,
     pub invitation: String,
-    pub browser_url: String,
     pub devices: Vec<Device>,
     pub statistics: Statistics,
     pub local_ms: u64,
@@ -77,45 +62,20 @@ pub struct View {
     pub observed: Option<(String, u64, Instant)>,
 }
 enum Job {
-    Version(String, anyhow::Result<String>),
-    ServerUpdateStatus(u64, anyhow::Result<serde_json::Value>),
-    ServerUpdate(u64, anyhow::Result<serde_json::Value>),
+    Discovered(u64, anyhow::Result<client::accounts::ServerIdentity>),
+
     Revoked(u64, anyhow::Result<()>),
-    Invited(u64, bool, anyhow::Result<Invitation>),
-    Started(u64, anyhow::Result<(RunningServer, Connection)>),
+    Invited(u64, anyhow::Result<Invitation>),
     Paired(u64, anyhow::Result<Connection>),
 }
-enum Updater {
-    Owner(wedex_cloud::admin::Owner),
-    Device(Connection),
-}
-impl Updater {
-    fn blocking_update(&self) -> anyhow::Result<serde_json::Value> {
-        match self {
-            Self::Owner(o) => o.blocking_update(),
-            Self::Device(c) => client::blocking_update(c, false),
-        }
-    }
-    fn blocking_update_status(&self) -> anyhow::Result<serde_json::Value> {
-        match self {
-            Self::Owner(o) => o.blocking_update_status(),
-            Self::Device(c) => client::blocking_update(c, true),
-        }
-    }
-}
 pub struct Cloud {
+    profile_reload: bool,
     library: library_sync::Sync,
-    owner: Option<wedex_cloud::admin::Owner>,
     transport: Option<Transport>,
     hitmo: hitmo::Discovery,
-    last_update: Instant,
-    update_started: Instant,
     sync: connections_sync::Sync,
     last_vault: Instant,
-    #[cfg(windows)]
-    provision: Option<wedex_provision::Worker>,
     pub view: View,
-    server: Option<RunningServer>,
     client: Option<Client>,
     connection: Option<Connection>,
     sender: Sender<Job>,
@@ -211,6 +171,14 @@ pub fn track(track: &Track) -> wedex_cloud::Track {
     }
 }
 impl Cloud {
+    pub fn catalog_connection(&self) -> Option<&Connection> {
+        self.connection.as_ref().filter(|_| {
+            self.view.connected && self.view.capabilities.iter().any(|c| c == "accounts-v1")
+        })
+    }
+    pub fn take_profile_reload(&mut self) -> bool {
+        std::mem::take(&mut self.profile_reload)
+    }
     #[cfg(test)]
     pub(crate) fn connected_for_test(connection: Connection) -> Self {
         let mut cloud = Self::new(true);
@@ -220,21 +188,16 @@ impl Cloud {
     pub fn new(preview: bool) -> Self {
         let (sender, receiver) = mpsc::channel();
         let mut cloud = Self {
+            profile_reload: false,
             library: Default::default(),
-            owner: None,
             transport: None,
-            last_update: Instant::now(),
-            update_started: Instant::now(),
             sync: Default::default(),
             hitmo: Default::default(),
             last_vault: Instant::now(),
-            #[cfg(windows)]
-            provision: None,
             view: View {
                 status: "Облако не подключено".into(),
                 ..Default::default()
             },
-            server: None,
             client: None,
             connection: None,
             sender,
@@ -261,35 +224,36 @@ impl Cloud {
         self.errors.push(format!("{error:#}"));
         self.view.status = "Что-то пошло не так".into();
     }
-    fn attach(&mut self, mut connection: Connection, save: bool) -> anyhow::Result<()> {
+    fn attach(&mut self, connection: Connection, save: bool) -> anyhow::Result<()> {
+        #[cfg(not(test))]
+        if save {
+            self.profile_reload = store::activate_account(&connection)?;
+        }
         self.library = Default::default();
         self.transport = None;
         self.view.transport_pending = false;
         self.hitmo = Default::default();
-        self.owner =
-            serde_json::from_str::<wedex_cloud::admin::Owner>(&store::secret("cloud-owner"))
-                .ok()
-                .filter(|o| {
-                    o.endpoint == connection.endpoint && o.certificate == connection.certificate
-                });
-        let owner = self.owner.is_some();
-        let mut save = save;
-        if connection.sync_key.is_none() && (self.server.is_some() || owner) {
-            connection.sync_key = Some(wedex_cloud::vault::new_key()?);
-            save = true;
-        }
+        self.view.account_name = connection
+            .credentials
+            .account
+            .as_ref()
+            .map(|a| a.username.clone())
+            .unwrap_or_default();
+        self.view.server_identity = Some(client::accounts::ServerIdentity {
+            endpoint: connection.endpoint.clone(),
+            certificate: connection.certificate.clone(),
+        });
+        self.view.server_trusted = true;
         self.sync = std::fs::read_to_string(vault_path(&connection))
             .ok()
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or_default();
         self.view.server_version.clear();
         self.view.capabilities.clear();
-        self.view.server_updating = false;
         self.view.sync_status.clear();
         self.client = Some(Client::spawn(connection.clone())?);
         self.view.own_device = connection.credentials.device_id.clone();
         self.view.endpoint = connection.endpoint.clone();
-        self.view.owner_access = owner;
         self.view.devices.clear();
         self.view.statistics = Statistics::default();
         self.view.selected.clear();
@@ -299,124 +263,97 @@ impl Cloud {
         self.view.status = "Подключаемся к облаку…".into();
         self.connection = Some(connection.clone());
         if save {
-            store::save_secret("cloud", &serde_json::to_string(&connection)?)?;
+            let value = serde_json::to_string(&connection)?;
+            if let Some(account) = &connection.credentials.account {
+                store::save_secret(
+                    &device_profile(&connection.endpoint, &account.username),
+                    &value,
+                )?;
+            }
+            store::save_secret("cloud", &value)?;
         }
         Ok(())
     }
     pub fn action(&mut self, action: Action) {
         let result = match action {
-            Action::UpdateServer => {
-                if let Some(owner) = self.remote_updater() {
-                    if self.view.server_updating {
-                        return;
-                    }
-                    self.view.server_updating = true;
-                    self.last_update = Instant::now();
-                    self.update_started = Instant::now();
-                    self.view.status = "Обновляем VPS…".into();
-                    let sender = self.sender.clone();
-                    let generation = self.generation;
-                    std::thread::spawn(move || {
-                        let _ = sender.send(Job::ServerUpdate(generation, owner.blocking_update()));
-                    });
-                    Ok(())
-                } else {
-                    Err(anyhow::anyhow!("Для обновления VPS нужен доступ владельца"))
-                }
-            }
-            #[cfg(windows)]
-            Action::ProvisionReset if self.provision.is_none() => {
-                self.view.vps = Default::default();
-                Ok(())
-            }
-            #[cfg(windows)]
-            Action::Provision(mut request) if self.provision.is_none() && !self.view.busy => {
-                request.previous = self.connection.clone();
-                let fingerprint = store::secret(&request.pin_name());
-                request.fingerprint = (!fingerprint.is_empty()).then_some(fingerprint);
-                match wedex_provision::Worker::start(*request, vps::BINARY) {
-                    Ok(worker) => {
-                        self.provision = Some(worker);
-                        self.view.busy = true;
-                        self.view.vps = vps::View {
-                            busy: true,
-                            ..Default::default()
-                        };
-                        Ok(())
-                    }
-                    Err(error) => {
-                        self.view.vps.error = Some(error.to_string());
-                        Err(error)
-                    }
-                }
-            }
-            #[cfg(windows)]
-            Action::ProvisionTrust(accept) => {
-                if let Some(worker) = &mut self.provision {
-                    worker.trust(accept);
-                }
-                self.view.vps.fingerprint = None;
-                Ok(())
-            }
-            #[cfg(windows)]
-            Action::ProvisionCancel => {
-                if let Some(worker) = &mut self.provision {
-                    worker.cancel();
-                }
-                self.view.vps.fingerprint = None;
-                Ok(())
-            }
-            Action::Start { lan } if !self.view.busy && self.server.is_none() => {
+            Action::Discover(address) if !self.view.busy => {
                 self.generation += 1;
-                let generation = self.generation;
                 self.view.busy = true;
-                self.view.status = "Запускаем локальный сервер…".into();
+                self.view.server_trusted = false;
+                self.view.server_identity = None;
+                self.view.status = "Проверяем сервер…".into();
                 let sender = self.sender.clone();
-                let previous = self.connection.clone();
+                let generation = self.generation;
                 std::thread::spawn(move || {
-                    let result = (|| {
-                        let bind = if lan {
-                            "0.0.0.0:8765"
-                        } else {
-                            "127.0.0.1:8765"
-                        }
-                        .parse()?;
-                        let server = server::start(server::Config {
-                            data_dir: store::data_dir().join("cloud-server"),
-                            bind,
-                        })?;
-                        let connection = match previous.filter(|old| {
-                            old.endpoint == server.endpoint && old.certificate == server.certificate
-                        }) {
-                            Some(connection) => connection,
-                            None => client::blocking_pair(
-                                &server.invitation(false)?,
-                                &computer_name(),
-                                true,
-                            )?,
-                        };
-                        Ok((server, connection))
-                    })();
-                    let _ = sender.send(Job::Started(generation, result));
+                    let _ = sender.send(Job::Discovered(
+                        generation,
+                        client::accounts::discover(&address),
+                    ));
                 });
                 Ok(())
             }
-            Action::Stop => {
-                self.hitmo = Default::default();
-                self.generation += 1;
-                self.view.busy = false;
-                self.client = None;
-                self.view.connected = false;
-                self.view.server_running = false;
-                self.view.invitation.clear();
-                self.view.browser_url.clear();
-                self.view.lan_endpoint = None;
-                for device in &mut self.view.devices {
-                    device.online = false;
+            Action::TrustServer => {
+                if let Some(identity) = &self.view.server_identity {
+                    match store::save_secret(
+                        &format!("cloud-pin:{}", identity.endpoint),
+                        &identity.certificate,
+                    ) {
+                        Ok(()) => {
+                            self.view.server_trusted = true;
+                            self.view.status = "Сервер подтверждён".into();
+                            Ok(())
+                        }
+                        Err(e) => Err(e),
+                    }
+                } else {
+                    Ok(())
                 }
-                self.view.status = "Локальный сервер остановлен".into();
-                if let Some(server) = self.server.take() {
-                    std::thread::spawn(move || drop(server));
+            }
+            Action::Account {
+                username,
+                password,
+                name,
+                register,
+            } if !self.view.busy => {
+                if !self.view.server_trusted {
+                    return;
+                }
+                if let Some(server) = self.view.server_identity.clone() {
+                    self.view.busy = true;
+                    self.generation += 1;
+                    let generation = self.generation;
+                    let sender = self.sender.clone();
+                    let previous = self
+                        .connection
+                        .clone()
+                        .filter(|c| {
+                            c.credentials
+                                .account
+                                .as_ref()
+                                .is_none_or(|a| a.username.eq_ignore_ascii_case(&username))
+                        })
+                        .or_else(|| {
+                            serde_json::from_str::<Connection>(&store::secret(&device_profile(
+                                &server.endpoint,
+                                &username,
+                            )))
+                            .ok()
+                        });
+                    let request = wedex_cloud::accounts::Login {
+                        username,
+                        password: password.into(),
+                        name,
+                        sync_key: previous
+                            .as_ref()
+                            .and_then(|c| c.sync_key.clone())
+                            .map(Into::into),
+                    };
+                    std::thread::spawn(move || {
+                        let _ = sender.send(Job::Paired(
+                            generation,
+                            client::accounts::blocking_account(server, request, register, previous),
+                        ));
+                    });
                 }
                 Ok(())
             }
@@ -426,7 +363,11 @@ impl Cloud {
                         if self.view.connected && invitation.sync_key.is_some() {
                             if let Some(mut existing) = self.connection.clone().filter(|c| {
                                 c.endpoint == invitation.endpoint
-                                    && c.certificate == invitation.certificate
+                                    && client::accounts::same_certificate(
+                                        &c.certificate,
+                                        &invitation.certificate,
+                                    )
+                                    && c.sync_key == invitation.sync_key
                             }) {
                                 existing.sync_key = invitation.sync_key;
                                 if let Err(e) = self.attach(existing, true) {
@@ -451,14 +392,6 @@ impl Cloud {
             }
             Action::Disconnect => {
                 self.hitmo = Default::default();
-                #[cfg(windows)]
-                if let Some(mut worker) = self.provision.take() {
-                    worker.cancel();
-                    self.view.vps.busy = false;
-                    self.view.vps.fingerprint = None;
-                }
-                self.view.owner_access = false;
-                self.view.server_updating = false;
                 self.generation += 1;
                 self.view.busy = false;
                 self.client = None;
@@ -466,65 +399,36 @@ impl Cloud {
                 self.view.connected = false;
                 self.view.devices.clear();
                 self.view.status = "Облако отключено".into();
-                store::save_secret("cloud", "")
+                store::remember_profile().and_then(|_| store::save_secret("cloud", ""))
             }
-            Action::Invite { browser } => {
-                if let Some(server) = &self.server {
-                    if browser {
-                        server
-                            .browser_invitation(server.lan_endpoint.is_some())
-                            .map(|url| {
-                                self.view.browser_url = url;
-                                self.view.invitation.clear();
-                            })
-                    } else {
-                        server
-                            .invitation(server.lan_endpoint.is_some())
-                            .map(|invite| {
-                                let mut invite = invite;
-                                invite.sync_key =
-                                    self.connection.as_ref().and_then(|c| c.sync_key.clone());
-                                self.view.invitation = invite.encode();
-                                self.view.browser_url.clear();
-                            })
-                    }
-                } else {
-                    let owner = serde_json::from_str::<wedex_cloud::admin::Owner>(&store::secret(
-                        "cloud-owner",
-                    ));
-                    if let Some(owner) = owner.ok().filter(|o| {
-                        o.endpoint == self.view.endpoint
-                            && self
-                                .connection
-                                .as_ref()
-                                .is_some_and(|c| c.certificate == o.certificate)
-                    }) {
-                        let sender = self.sender.clone();
-                        let generation = self.generation;
-                        std::thread::spawn(move || {
-                            let result = tokio_invite(owner);
-                            let _ = sender.send(Job::Invited(generation, browser, result));
-                        });
-                        Ok(())
-                    } else {
-                        Err(anyhow::anyhow!(
-                            "Создать приглашение может владелец сервера"
-                        ))
-                    }
-                }
-            }
-            Action::Revoke(id) => {
-                if let Some(server) = &self.server {
-                    server.revoke(&id)
-                } else if let Some(owner) = self.remote_owner() {
+            Action::Invite => {
+                if let Some(connection) = self.connection.clone() {
                     let sender = self.sender.clone();
                     let generation = self.generation;
                     std::thread::spawn(move || {
-                        let _ = sender.send(Job::Revoked(generation, owner.blocking_revoke(&id)));
+                        let _ = sender.send(Job::Invited(
+                            generation,
+                            client::accounts::blocking_invite(&connection),
+                        ));
                     });
                     Ok(())
                 } else {
-                    Err(anyhow::anyhow!("Нужен доступ владельца сервера"))
+                    Err(anyhow::anyhow!("Сначала войдите в аккаунт"))
+                }
+            }
+            Action::Revoke(id) => {
+                if let Some(connection) = self.connection.clone() {
+                    let sender = self.sender.clone();
+                    let generation = self.generation;
+                    std::thread::spawn(move || {
+                        let _ = sender.send(Job::Revoked(
+                            generation,
+                            client::accounts::blocking_revoke(&connection, &id),
+                        ));
+                    });
+                    Ok(())
+                } else {
+                    Err(anyhow::anyhow!("Сначала войдите в аккаунт"))
                 }
             }
             Action::Target(id) => {
@@ -668,93 +572,6 @@ impl Cloud {
             }
         }
     }
-    fn remote_updater(&self) -> Option<Updater> {
-        self.remote_owner().map(Updater::Owner).or_else(|| {
-            self.view
-                .capabilities
-                .iter()
-                .any(|c| c == "device-server-update")
-                .then(|| self.connection.clone())
-                .flatten()
-                .map(Updater::Device)
-        })
-    }
-    fn remote_owner(&self) -> Option<wedex_cloud::admin::Owner> {
-        self.owner.clone().filter(|owner| {
-            owner.endpoint == self.view.endpoint
-                && self
-                    .connection
-                    .as_ref()
-                    .is_some_and(|c| c.certificate == owner.certificate)
-        })
-    }
-    #[cfg(windows)]
-    fn poll_provision(&mut self) {
-        use wedex_provision::Event;
-        let mut events = vec![];
-        if let Some(worker) = &mut self.provision {
-            while let Ok(event) = worker.events.try_recv() {
-                events.push(event);
-            }
-        }
-        for event in events {
-            match event {
-                Event::Step(step) => self.view.vps.steps.push(step),
-                Event::HostKey {
-                    fingerprint,
-                    previous,
-                } => {
-                    self.view.vps.fingerprint = Some(fingerprint);
-                    self.view.vps.previous = previous;
-                }
-                Event::Trusted {
-                    pin_name,
-                    fingerprint,
-                } => {
-                    if let Err(error) = store::save_secret(&pin_name, &fingerprint) {
-                        self.error(error);
-                    }
-                }
-                Event::Bootstrap(owner) => {
-                    if let Err(error) = serde_json::to_string(&owner)
-                        .map_err(anyhow::Error::from)
-                        .and_then(|value| store::save_secret("cloud-owner", &value))
-                    {
-                        self.error(error);
-                    }
-                }
-                Event::Complete(connection) => {
-                    self.view.busy = false;
-                    // Switching to a VPS never destroys the previous local server's data.
-                    if let Some(server) = self.server.take() {
-                        std::thread::spawn(move || drop(server));
-                    }
-                    self.view.server_running = false;
-                    self.view.lan_endpoint = None;
-                    self.view.invitation.clear();
-                    self.view.browser_url.clear();
-                    self.view.vps.busy = false;
-                    self.view.vps.complete = true;
-                    self.view
-                        .vps
-                        .steps
-                        .push("Готово · ПК подключён к VPS".into());
-                    self.provision = None;
-                    if let Err(error) = self.attach(connection, true) {
-                        self.error(error);
-                    }
-                }
-                Event::Failed(error) => {
-                    self.view.busy = false;
-                    self.view.vps.busy = false;
-                    self.view.vps.fingerprint = None;
-                    self.view.vps.error = Some(error.clone());
-                    self.provision = None;
-                    self.error(anyhow::anyhow!(error));
-                }
-            }
-        }
-    }
     fn send(&self, message: ClientMessage) -> anyhow::Result<()> {
         self.client
             .as_ref()
@@ -784,28 +601,6 @@ impl Cloud {
             self.transport = None;
             self.view.transport_pending = false;
         }
-        if self.view.server_updating && self.update_started.elapsed() > Duration::from_secs(1200) {
-            self.view.server_updating = false;
-            self.error(anyhow::anyhow!(
-                "Истекло время ожидания обновления VPS; проверьте подключение к серверу"
-            ));
-        }
-        if self.view.server_updating && self.last_update.elapsed() > Duration::from_secs(3) {
-            if let Some(owner) = self.remote_updater() {
-                let sender = self.sender.clone();
-                let generation = self.generation;
-                std::thread::spawn(move || {
-                    let _ = sender.send(Job::ServerUpdateStatus(
-                        generation,
-                        owner.blocking_update_status(),
-                    ));
-                });
-            }
-            self.last_update = Instant::now();
-        }
-        #[cfg(windows)]
-        self.poll_provision();
-        self.view.can_update_server = self.remote_updater().is_some();
         let LocalPlayback {
             status,
             queue,
@@ -820,78 +615,44 @@ impl Cloud {
         }
         for event in self.receiver.try_iter().collect::<Vec<_>>() {
             match event {
-                Job::ServerUpdateStatus(generation, Ok(value)) if generation == self.generation => {
-                    let state = value["state"].as_str().unwrap_or("");
-                    if state == "done" {
-                        self.view.server_updating = false;
-                        self.view.status = "VPS обновлена".into();
-                        self.view.server_version =
-                            value["version"].as_str().unwrap_or_default().into();
-                    } else if state == "error" {
-                        self.view.server_updating = false;
-                        self.error(anyhow::anyhow!(
-                            "{}",
-                            value["message"].as_str().unwrap_or("Ошибка обновления VPS")
-                        ));
-                    }
-                }
-                Job::Version(endpoint, Ok(version))
-                    if endpoint == self.view.endpoint && self.view.server_version.is_empty() =>
-                {
-                    self.view.server_version = version
-                }
-                Job::ServerUpdate(generation, result) if generation == self.generation => {
+                Job::Discovered(generation, result) if generation == self.generation => {
+                    self.view.busy = false;
                     match result {
-                        Ok(value) if value["state"] == "up_to_date" => {
-                            self.view.server_updating = false;
-                            self.view.status = "На VPS установлена последняя версия".into();
+                        Ok(identity) => {
+                            self.view.server_trusted = client::accounts::same_certificate(
+                                &store::secret(&format!("cloud-pin:{}", identity.endpoint)),
+                                &identity.certificate,
+                            );
+                            self.view.server_identity = Some(identity);
+                            self.view.status = if self.view.server_trusted {
+                                "Сервер подтверждён"
+                            } else {
+                                "Сверьте отпечаток с владельцем сервера"
+                            }
+                            .into();
                         }
-                        Ok(_) => self.view.status = "VPS обновляется · ожидаем перезапуск".into(),
-                        Err(e) => {
-                            self.view.server_updating = false;
-                            self.error(e)
-                        }
+                        Err(e) => self.error(e),
                     }
                 }
                 Job::Revoked(generation, Err(error)) if generation == self.generation => {
                     self.error(error)
                 }
-                Job::Invited(generation, browser, result) if generation == self.generation => {
-                    match result {
-                        Ok(invite) => {
-                            let mut invite = invite;
-                            invite.sync_key =
-                                self.connection.as_ref().and_then(|c| c.sync_key.clone());
-                            if browser {
-                                self.view.browser_url =
-                                    format!("{}#pair={}", invite.endpoint, invite.code);
-                                self.view.invitation.clear();
-                            } else {
-                                self.view.invitation = invite.encode();
-                                self.view.browser_url.clear();
-                            }
-                        }
-                        Err(error) => self.error(error),
+                Job::Invited(generation, result) if generation == self.generation => match result {
+                    Ok(invite) => {
+                        let mut invite = invite;
+                        invite.sync_key = self.connection.as_ref().and_then(|c| c.sync_key.clone());
+                        self.view.invitation = invite.encode();
                     }
-                }
-                Job::Started(generation, result) if generation == self.generation => {
-                    self.view.busy = false;
-                    match result {
-                        Ok((server, connection)) => {
-                            self.view.server_running = true;
-                            self.view.lan_endpoint = server.lan_endpoint.clone();
-                            self.server = Some(server);
-                            if let Err(error) = self.attach(connection, true) {
-                                self.error(error);
-                            }
-                        }
-                        Err(error) => self.error(error),
-                    }
-                }
+                    Err(error) => self.error(error),
+                },
                 Job::Paired(generation, result) if generation == self.generation => {
                     self.view.busy = false;
                     match result {
                         Ok(connection) => {
+                            if let Err(error) = self.listening.flush(store) {
+                                self.error(error);
+                                continue;
+                            }
                             if let Err(error) = self.attach(connection, true) {
                                 self.error(error);
                             }
@@ -901,6 +662,9 @@ impl Cloud {
                 }
                 _ => {}
             }
+        }
+        if self.profile_reload {
+            return vec![];
         }
         let mut deliveries = vec![];
         let events = self
@@ -913,13 +677,6 @@ impl Cloud {
                 client::Event::Connected => {
                     self.library.inflight = None;
                     self.library.dirty = true;
-                    if let Some(owner) = self.remote_owner() {
-                        let sender = self.sender.clone();
-                        let endpoint = owner.endpoint.clone();
-                        std::thread::spawn(move || {
-                            let _ = sender.send(Job::Version(endpoint, owner.blocking_version()));
-                        });
-                    }
                     self.sync.ready = false;
                     self.last_vault = now - Duration::from_secs(31);
                     self.view.connected = true;
@@ -1190,13 +947,6 @@ impl Cloud {
         deliveries
     }
 }
-fn computer_name() -> String {
-    std::env::var("COMPUTERNAME")
-        .unwrap_or_else(|_| "WeDex на ПК".into())
-        .chars()
-        .take(60)
-        .collect()
-}
 fn vault_path(connection: &Connection) -> std::path::PathBuf {
     store::data_dir().join(format!(
         "connections-{}-{:x}.json",
@@ -1204,6 +954,10 @@ fn vault_path(connection: &Connection) -> std::path::PathBuf {
         md5::compute(connection.sync_key.as_deref().unwrap_or_default())
     ))
 }
-fn tokio_invite(owner: wedex_cloud::admin::Owner) -> anyhow::Result<Invitation> {
-    owner.blocking_invitation()
+
+fn device_profile(endpoint: &str, username: &str) -> String {
+    format!(
+        "cloud-device:{:x}",
+        md5::compute(format!("{endpoint}:{}", username.to_ascii_lowercase()))
+    )
 }

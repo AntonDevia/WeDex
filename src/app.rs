@@ -1594,15 +1594,7 @@ impl App {
     }
     pub(crate) fn background_tick(&mut self) {
         if self.preview_status.is_none() {
-            self.updates.tick(
-                if (self.cloud.view.owner_access || self.cloud.view.can_update_server)
-                    && !self.cloud.view.server_running
-                {
-                    &self.cloud.view.server_version
-                } else {
-                    ""
-                },
-            );
+            self.updates.tick();
         }
         #[cfg(target_os = "android")]
         if let Some(invitation) = crate::android::take_invitation() {
@@ -1676,6 +1668,16 @@ impl App {
                 },
                 self.store.as_ref(),
             );
+            let relay = self.cloud.catalog_connection();
+            if self
+                .services
+                .cloud
+                .as_ref()
+                .map(|c| (&c.endpoint, &c.credentials.device_id))
+                != relay.map(|c| (&c.endpoint, &c.credentials.device_id))
+            {
+                self.services.cloud = relay.cloned().map(Arc::new);
+            }
             if self.cloud.take_library_change() {
                 if let Some(store) = &self.store {
                     match store.favorites() {
@@ -1809,28 +1811,7 @@ impl App {
             }
             Intent::Cloud(action) => self.cloud.action(action),
             Intent::Update(action) => {
-                if matches!(action, crate::updates::Action::Server) {
-                    if !self
-                        .cloud
-                        .view
-                        .capabilities
-                        .iter()
-                        .any(|c| c == "server-update")
-                    {
-                        #[cfg(windows)]
-                        {
-                            self.interface.overlay = Some(crate::glass::Overlay::Vps);
-                        }
-                        #[cfg(not(windows))]
-                        {
-                            self.message = "Сначала обновите сервер с ПК".into();
-                        }
-                    } else {
-                        self.cloud.action(crate::cloud::Action::UpdateServer);
-                    }
-                    return;
-                }
-                if let Err(e) = self.updates.action(action, &self.cloud.view.server_version) {
+                if let Err(e) = self.updates.action(action) {
                     self.report_error("update", e.to_string());
                 }
             }
@@ -2194,6 +2175,17 @@ fn should_crossfade(status: &audio::Status, settings: &Settings, handled: Option
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if self.cloud.take_profile_reload() {
+            self.player.stop();
+            self.downloads.cancel();
+            self.cloud.flush(self.store.as_ref());
+            self.persist();
+            let mut app = Self::with_context(ctx, None);
+            app.interface.overlay = Some(crate::glass::Overlay::Cloud);
+            *self = app;
+            ctx.request_repaint();
+            return;
+        }
         if self.settings_due.is_some_and(|at| Instant::now() >= at) {
             self.persist();
         }

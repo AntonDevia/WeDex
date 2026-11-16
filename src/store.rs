@@ -90,7 +90,7 @@ pub fn data_dir() -> PathBuf {
         .map(|p| p.data_local_dir().to_owned())
         .unwrap_or_else(|| PathBuf::from(".local"))
 }
-pub fn secret(name: &str) -> String {
+fn raw_secret(name: &str) -> String {
     #[cfg(target_os = "android")]
     {
         crate::android::read_secret(name).unwrap_or_default()
@@ -117,7 +117,7 @@ pub fn secret(name: &str) -> String {
         String::new()
     }
 }
-pub fn save_secret(name: &str, value: &str) -> Result<()> {
+fn raw_save_secret(name: &str, value: &str) -> Result<()> {
     #[cfg(target_os = "android")]
     {
         crate::android::write_secret(name, value)
@@ -138,6 +138,86 @@ pub fn save_secret(name: &str, value: &str) -> Result<()> {
     }
 }
 
+fn active_profile() -> String {
+    let cloud = raw_secret("cloud");
+    if !cloud.is_empty() {
+        return serde_json::from_str::<wedex_cloud::client::Connection>(&cloud)
+            .ok()
+            .filter(|c| c.credentials.account.is_some())
+            .map(|c| c.server_id())
+            .unwrap_or_default();
+    }
+    raw_secret("cloud-profile")
+}
+pub fn secret(name: &str) -> String {
+    let profile = active_profile();
+    if !profile.is_empty() && matches!(name, "yandex" | "lastfm" | "soundcloud") {
+        return raw_secret(&format!("profile:{profile}:{name}"));
+    }
+    raw_secret(name)
+}
+pub fn save_secret(name: &str, value: &str) -> Result<()> {
+    let profile = active_profile();
+    if !profile.is_empty() && matches!(name, "yandex" | "lastfm" | "soundcloud") {
+        return raw_save_secret(&format!("profile:{profile}:{name}"), value);
+    }
+    raw_save_secret(name, value)
+}
+pub fn remember_profile() -> Result<()> {
+    let profile = active_profile();
+    if profile.is_empty() {
+        Ok(())
+    } else {
+        raw_save_secret("cloud-profile", &profile)
+    }
+}
+fn profile_directory() -> PathBuf {
+    let profile = active_profile();
+    if profile.len() == 64 && profile.bytes().all(|b| b.is_ascii_hexdigit()) {
+        data_dir().join("profiles").join(profile)
+    } else {
+        data_dir()
+    }
+}
+fn prepare_profile(
+    root: &std::path::Path,
+    destination: &std::path::Path,
+    import: bool,
+) -> Result<()> {
+    std::fs::create_dir_all(destination)?;
+    let source = root.join("library.sqlite3");
+    let target = destination.join("library.sqlite3");
+    if import && source.exists() && !target.exists() {
+        Connection::open(source)?.execute("VACUUM INTO ?", [target.to_string_lossy().as_ref()])?;
+    }
+    Ok(())
+}
+/// Import the pre-account installation once. Subsequent accounts start with a separate local library and credentials.
+#[cfg(not(test))]
+pub fn activate_account(connection: &wedex_cloud::client::Connection) -> Result<bool> {
+    if connection.credentials.account.is_none() {
+        return Ok(!active_profile().is_empty());
+    }
+    let scope = connection.server_id();
+    if active_profile() == scope {
+        return Ok(false);
+    }
+    let destination = data_dir().join("profiles").join(&scope);
+    let first = raw_secret("cloud-profile-adopted").is_empty();
+    prepare_profile(&data_dir(), &destination, first)?;
+    if first {
+        for name in ["yandex", "lastfm", "soundcloud"] {
+            let value = raw_secret(name);
+            if !value.is_empty() {
+                raw_save_secret(&format!("profile:{scope}:{name}"), &value)?;
+            }
+        }
+        raw_save_secret("cloud-profile-adopted", &scope)?;
+    }
+    // Saving the Connection in one system-credential entry commits both identity and active profile.
+    Ok(true)
+}
+
 pub struct Store {
     db: Connection,
 }
@@ -147,8 +227,9 @@ impl Store {
         Self::initialize(Connection::open_in_memory().unwrap()).unwrap()
     }
     pub fn open() -> Result<Self> {
-        std::fs::create_dir_all(data_dir())?;
-        let db = Connection::open(data_dir().join("library.sqlite3"))?;
+        let directory = profile_directory();
+        std::fs::create_dir_all(&directory)?;
+        let db = Connection::open(directory.join("library.sqlite3"))?;
         Self::initialize(db)
     }
     fn initialize(db: Connection) -> Result<Self> {
@@ -388,5 +469,51 @@ mod tests {
         assert_eq!(store.history().unwrap().len(), 1);
         store.clear_replacement(&a).unwrap();
         assert!(store.replacement(&a).is_none());
+    }
+}
+
+#[cfg(test)]
+mod account_profile_tests {
+    use super::*;
+    #[test]
+    fn account_profiles_adopt_existing_music_once_and_keep_later_accounts_separate() {
+        let root =
+            std::env::temp_dir().join(format!("wedex-profile-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let original =
+            Store::initialize(Connection::open(root.join("library.sqlite3")).unwrap()).unwrap();
+        let song = crate::model::tests::track("First account only", "Artist", 180);
+        original.favorite(&song, true).unwrap();
+        let a = root.join("profiles/a");
+        let b = root.join("profiles/b");
+        prepare_profile(&root, &a, true).unwrap();
+        prepare_profile(&root, &b, false).unwrap();
+        let first =
+            Store::initialize(Connection::open(a.join("library.sqlite3")).unwrap()).unwrap();
+        let second =
+            Store::initialize(Connection::open(b.join("library.sqlite3")).unwrap()).unwrap();
+        assert_eq!(first.favorites().unwrap().len(), 1);
+        assert!(second.favorites().unwrap().is_empty());
+        second
+            .favorite(
+                &crate::model::tests::track("Second account only", "Other", 180),
+                true,
+            )
+            .unwrap();
+        assert_eq!(first.favorites().unwrap()[0].title, "First account only");
+        assert_eq!(original.favorites().unwrap()[0].title, "First account only");
+        drop(first);
+        drop(second);
+        drop(original);
+        // Only this UUID-named test directory, resolved under the system temporary directory.
+        assert!(
+            root.starts_with(std::env::temp_dir())
+                && root
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .starts_with("wedex-profile-test-")
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

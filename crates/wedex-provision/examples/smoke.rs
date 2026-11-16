@@ -59,6 +59,7 @@ fn main() -> Result<()> {
                 }
                 Event::Trusted { .. } => println!("Trusted known fixture key"),
                 Event::Step(step) => println!("{step}"),
+                Event::Managed(_) => {}
                 Event::Bootstrap(owner) => {
                     std::fs::write(folder.join("owner.json"), serde_json::to_vec(&owner)?)?
                 }

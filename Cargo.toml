@@ -1,12 +1,12 @@
 [package]
 name = "wedex"
-version = "0.11.2"
+version = "0.12.0"
 edition = "2021"
 description = "Sonora — a native music client with Yandex Wave, Hitmo audio and offline playback"
 license = "MIT"
 
 [workspace]
-members = ["crates/wedex-cloud", "crates/wedex-provision", "crates/wedex-update"]
+members = ["crates/wedex-cloud", "crates/wedex-provision", "crates/wedex-update", "crates/wedex-master"]
 resolver = "2"
 
 [[bin]]
@@ -20,6 +20,7 @@ crate-type = ["rlib", "cdylib"]
 wedex-cloud = { path = "crates/wedex-cloud" }
 wedex-update = { path = "crates/wedex-update" }
 anyhow = "1"
+zeroize = "1"
 base64 = "0.22"
 byteorder = "1.5"
 chfft = "0.3.4"
@@ -45,8 +46,6 @@ webbrowser = "1"
 time = { version = "0.3", features = ["formatting"] }
 
 [target.'cfg(windows)'.dependencies]
-wedex-provision = { path = "crates/wedex-provision" }
-zeroize = "1"
 keyring = { version = "3", features = ["windows-native"] }
 tray-icon = { version = "0.26.1", default-features = false }
 

@@ -1,11 +1,13 @@
 [package]
 name = "wedex-cloud"
-version = "0.11.0"
+version = "0.12.0"
 edition = "2021"
 license = "MIT"
 
 [dependencies]
 anyhow = "1"
+argon2 = "0.6"
+zeroize = { version = "1", features = ["serde"] }
 chacha20poly1305 = "0.10"
 getrandom = "0.3"
 wedex-update = { path = "../wedex-update" }

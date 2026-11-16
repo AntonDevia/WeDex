@@ -42,13 +42,17 @@ jobs:
         with:
           name: linux-server
           path: assets/server
-      - run: cargo build --release --locked --bin sonora
+      - run: cargo build --release --locked --workspace --bin sonora --bin wedex-master
       - shell: pwsh
-        run: Copy-Item target/release/sonora.exe WeDex-Windows.exe
+        run: |
+          Copy-Item target/release/sonora.exe WeDex-Windows.exe
+          Copy-Item target/release/wedex-master.exe WeDex-Master.exe
       - uses: actions/upload-artifact@v4
         with:
           name: windows
-          path: WeDex-Windows.exe
+          path: |
+            WeDex-Windows.exe
+            WeDex-Master.exe
   android:
     if: ${{ vars.ANDROID_RELEASES_ENABLED == 'true' && !startsWith(inputs.tag || github.ref_name, 'server-') && !startsWith(inputs.tag || github.ref_name, 'windows-') }}
     runs-on: ubuntu-24.04
@@ -116,6 +120,7 @@ jobs:
       - run: |
           mkdir release
           if [ -f release-artifacts/windows/WeDex-Windows.exe ]; then cp release-artifacts/windows/WeDex-Windows.exe release/; fi
+          if [ -f release-artifacts/windows/WeDex-Master.exe ]; then cp release-artifacts/windows/WeDex-Master.exe release/; fi
           if [ -f release-artifacts/android/WeDex-Android.apk ]; then cp release-artifacts/android/WeDex-Android.apk release/; fi
           if [[ "$RELEASE_TAG" == server-* || "$RELEASE_TAG" == v* ]]; then cp release-artifacts/linux-server/wedex-server-x86_64-linux-musl release/; fi
           if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then

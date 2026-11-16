@@ -25,6 +25,17 @@ fn time(s: &str) -> u64 {
 
 impl Services {
     pub fn hitmotop_search(&self, query: &str) -> Result<Vec<Track>> {
+        if let Some(connection) = &self.cloud {
+            if let Ok((base, body)) =
+                wedex_cloud::client::accounts::blocking_search(connection, query)
+            {
+                if let Ok(tracks) = parse_hitmotop(&body, &url::Url::parse(&base)?) {
+                    if !tracks.is_empty() {
+                        return Ok(tracks);
+                    }
+                }
+            }
+        }
         let page = request(
             self.http
                 .get(format!("{}search", self.hitmo_base))

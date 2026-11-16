@@ -3600,6 +3600,7 @@ version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "aab41826031698d6ffcd9cff78ef56ef998e39dc7e5067cdfebe373842d4723b"
 dependencies = [
+ "getrandom 0.4.3",
  "phc",
 ]
 
@@ -3652,6 +3653,7 @@ checksum = "44dc769b75f93afdddd8c7fa12d685292ddeff1e66f7f0f3a234cf1818afe892"
 dependencies = [
  "base64ct",
  "ctutils",
+ "getrandom 0.4.3",
 ]
 
 [[package]]
@@ -6072,7 +6074,7 @@ dependencies = [
 
 [[package]]
 name = "wedex"
-version = "0.11.2"
+version = "0.12.0"
 dependencies = [
  "android_logger",
  "anyhow",
@@ -6104,7 +6106,6 @@ dependencies = [
  "uuid",
  "webbrowser",
  "wedex-cloud",
- "wedex-provision",
  "wedex-update",
  "winit",
  "zeroize",
@@ -6112,9 +6113,10 @@ dependencies = [
 
 [[package]]
 name = "wedex-cloud"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "anyhow",
+ "argon2",
  "axum",
  "axum-server",
  "base64 0.22.1",
@@ -6136,6 +6138,21 @@ dependencies = [
  "url",
  "uuid",
  "wedex-update",
+ "zeroize",
+]
+
+[[package]]
+name = "wedex-master"
+version = "0.12.0"
+dependencies = [
+ "anyhow",
+ "eframe",
+ "keyring",
+ "serde_json",
+ "wedex-cloud",
+ "wedex-provision",
+ "wedex-update",
+ "zeroize",
 ]
 
 [[package]]
@@ -6967,6 +6984,9 @@ name = "zeroize"
 version = "1.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e13084392c5e4bc371903e2935a5eaeed24905a7511356b883835e18a78f6879"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "zerotrie"

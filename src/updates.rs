@@ -7,7 +7,6 @@ use wedex_update::{Release, Target};
 #[derive(Clone, Default)]
 pub struct View {
     pub app: Option<Release>,
-    pub server: Option<Release>,
     pub busy: bool,
     pub progress: Option<f32>,
     pub ready: Option<PathBuf>,
@@ -18,10 +17,9 @@ pub enum Action {
     Check,
     Download,
     Apply,
-    Server,
 }
 enum Event {
-    Checked(Target, Result<Option<Release>, String>),
+    Checked(Result<Option<Release>, String>),
     Progress(f32),
     Downloaded(Result<PathBuf, String>),
 }
@@ -30,7 +28,6 @@ pub struct Updates {
     tx: mpsc::Sender<Event>,
     rx: mpsc::Receiver<Event>,
     last: Option<Instant>,
-    server_version: String,
     checking: usize,
     pub prompt: bool,
     pub exit: bool,
@@ -43,7 +40,6 @@ impl Default for Updates {
             tx,
             rx,
             last: None,
-            server_version: String::new(),
             checking: 0,
             prompt: false,
             exit: false,
@@ -51,7 +47,7 @@ impl Default for Updates {
     }
 }
 impl Updates {
-    pub fn check(&mut self, server: &str) {
+    pub fn check(&mut self) {
         if self.view.busy {
             return;
         }
@@ -63,40 +59,28 @@ impl Updates {
         } else {
             Target::Windows
         };
-        for (target, current) in [
-            (target, env!("CARGO_PKG_VERSION").to_owned()),
-            (Target::Server, server.to_owned()),
-        ] {
-            if current.is_empty() {
-                continue;
-            }
-            self.checking += 1;
-            let tx = self.tx.clone();
-            std::thread::spawn(move || {
-                let result =
-                    wedex_update::check(wedex_update::DEFAULT_REPOSITORY, target, &current)
-                        .map_err(|e| e.to_string());
-                let _ = tx.send(Event::Checked(target, result));
-            });
-        }
+        self.checking = 1;
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let result = wedex_update::check(
+                wedex_update::DEFAULT_REPOSITORY,
+                target,
+                env!("CARGO_PKG_VERSION"),
+            )
+            .map_err(|e| e.to_string());
+            let _ = tx.send(Event::Checked(result));
+        });
     }
-    pub fn tick(&mut self, server: &str) {
-        if server.is_empty() {
-            self.view.server = None;
-        }
+    pub fn tick(&mut self) {
         if self
             .last
             .is_none_or(|t| t.elapsed() > Duration::from_secs(6 * 3600))
         {
-            self.check(server);
-        }
-        if !server.is_empty() && server != self.server_version {
-            self.server_version = server.into();
-            self.last = None;
+            self.check();
         }
         while let Ok(event) = self.rx.try_recv() {
             match event {
-                Event::Checked(target, result) => {
+                Event::Checked(result) => {
                     self.checking = self.checking.saturating_sub(1);
                     self.view.busy = self.checking > 0 || self.view.progress.is_some();
                     match result {
@@ -104,18 +88,13 @@ impl Updates {
                             if release.is_some() {
                                 self.prompt = true;
                             }
-                            if target == Target::Server {
-                                self.view.server = release;
+                            self.view.app = release;
+                            self.view.message = if self.view.app.is_some() {
+                                "Доступно обновление"
                             } else {
-                                self.view.app = release;
+                                "Установлена актуальная версия"
                             }
-                            self.view.message =
-                                if self.view.app.is_some() || self.view.server.is_some() {
-                                    "Доступно обновление"
-                                } else {
-                                    "Установлена актуальная версия"
-                                }
-                                .into();
+                            .into();
                         }
                         Err(error) => {
                             self.view.message = "Не удалось проверить обновления".into();
@@ -151,9 +130,9 @@ impl Updates {
             }
         }
     }
-    pub fn action(&mut self, action: Action, server: &str) -> anyhow::Result<()> {
+    pub fn action(&mut self, action: Action) -> anyhow::Result<()> {
         match action {
-            Action::Check => self.check(server),
+            Action::Check => self.check(),
             Action::Download if !self.view.busy => {
                 if let Some(release) = self.view.app.clone() {
                     self.view.busy = true;

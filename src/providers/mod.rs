@@ -12,6 +12,7 @@ use std::{collections::HashSet, time::Duration};
 
 #[derive(Clone)]
 pub struct Services {
+    pub cloud: Option<std::sync::Arc<wedex_cloud::client::Connection>>,
     pub http: Client,
     pub yandex: String,
     pub lastfm: String,
@@ -510,6 +511,7 @@ impl Services {
             .build()
             .expect("HTTP client");
         Self {
+            cloud: None,
             http,
             yandex,
             lastfm,

@@ -22,8 +22,6 @@ mod theme;
 mod touch;
 mod transitions;
 mod updates;
-#[cfg(windows)]
-mod vps;
 
 use crate::{
     audio::Status,
@@ -74,8 +72,6 @@ pub enum Page {
 pub enum Overlay {
     TrackActions,
     Updates,
-    #[cfg(windows)]
-    Vps,
     Devices,
     Cloud,
     Artists,
@@ -145,14 +141,11 @@ pub(super) enum Control {
     CacheAuto,
     OfflineOnly,
     Update(crate::updates::Action),
-    #[cfg(windows)]
-    VpsStart(bool),
-    #[cfg(windows)]
-    VpsAuth(bool),
     Cloud(crate::cloud::Action),
     CloudConnect,
-    CloudCopy(bool),
-    CloudLan,
+    CloudCopy,
+    CloudDiscover,
+    CloudAccount(bool),
     Artist(model::Artist),
     ArtistMore,
     ArtistSources(String),
@@ -256,8 +249,6 @@ pub struct GlassUi {
     touch_long: bool,
     pub cloud_view: crate::cloud::View,
     cloud_editor: cloud::Editor,
-    #[cfg(windows)]
-    vps_editor: vps::Editor,
     lyrics_manual_until: f64,
     lyrics_manual_offset: Option<f32>,
     lyrics_manual_visibility: transitions::Tween,
@@ -350,8 +341,6 @@ impl GlassUi {
             touch_long: false,
             cloud_view: Default::default(),
             cloud_editor: Default::default(),
-            #[cfg(windows)]
-            vps_editor: Default::default(),
             lyrics_manual_until: -1.,
             lyrics_manual_offset: None,
             lyrics_manual_visibility: transitions::Tween::new(0.),
@@ -426,8 +415,7 @@ impl GlassUi {
                 Some(Overlay::TrackActions)
             }
             "updates" => Some(Overlay::Updates),
-            #[cfg(windows)]
-            "vps" => Some(Overlay::Vps),
+            "vps" => Some(Overlay::Cloud),
             "queue" => Some(Overlay::Queue),
             "eq" | "eq-warm" => Some(Overlay::Eq),
             "sources" => Some(Overlay::Sources),
@@ -1317,10 +1305,6 @@ impl GlassUi {
         if overlay == Overlay::Updates {
             return Some(updates::panel(self, ctx, m));
         }
-        #[cfg(windows)]
-        if overlay == Overlay::Vps {
-            return Some(vps::panel(self));
-        }
         if overlay == Overlay::Devices {
             return Some(cloud::devices_panel(self));
         }
@@ -1345,8 +1329,6 @@ impl GlassUi {
         let id = match overlay {
             Overlay::TrackActions => unreachable!(),
             Overlay::Updates => unreachable!(),
-            #[cfg(windows)]
-            Overlay::Vps => unreachable!(),
             Overlay::Cloud | Overlay::Devices => unreachable!(),
             Overlay::Artists => unreachable!(),
             Overlay::Settings => "13:2407",
@@ -1384,8 +1366,6 @@ impl GlassUi {
         match overlay {
             Overlay::TrackActions => unreachable!(),
             Overlay::Updates => unreachable!(),
-            #[cfg(windows)]
-            Overlay::Vps => unreachable!(),
             Overlay::Cloud | Overlay::Devices => unreachable!(),
             Overlay::Artists => unreachable!(),
             Overlay::Settings => unreachable!(),
@@ -1745,23 +1725,6 @@ impl GlassUi {
             Control::CacheAuto => out.push(Intent::CacheAuto(!m.settings.cache_auto)),
             Control::OfflineOnly => out.push(Intent::OfflineOnly(!m.settings.offline_only)),
             Control::Update(action) => out.push(Intent::Update(action)),
-            #[cfg(windows)]
-            Control::VpsAuth(key) => self.vps_editor.key = key,
-            #[cfg(windows)]
-            Control::VpsStart(connect_only) => {
-                match self
-                    .vps_editor
-                    .request(connect_only, &self.cloud_editor.name)
-                {
-                    Ok(request) => {
-                        self.vps_editor.error = None;
-                        out.push(Intent::Cloud(crate::cloud::Action::Provision(Box::new(
-                            request,
-                        ))));
-                    }
-                    Err(error) => self.vps_editor.error = Some(error.to_string()),
-                }
-            }
             Control::Cloud(action) => {
                 if self.overlay == Some(Overlay::Devices)
                     && matches!(action, crate::cloud::Action::Target(_))
@@ -1774,8 +1737,18 @@ impl GlassUi {
                 invitation: self.cloud_editor.invitation.clone(),
                 name: self.cloud_editor.name.clone(),
             })),
-            Control::CloudCopy(browser) => self.cloud_editor.copy = Some(browser),
-            Control::CloudLan => self.cloud_editor.lan = !self.cloud_editor.lan,
+            Control::CloudCopy => self.cloud_editor.copy = true,
+            Control::CloudDiscover => out.push(Intent::Cloud(crate::cloud::Action::Discover(
+                self.cloud_editor.server.clone(),
+            ))),
+            Control::CloudAccount(register) => {
+                out.push(Intent::Cloud(crate::cloud::Action::Account {
+                    username: self.cloud_editor.username.clone(),
+                    password: std::mem::take(&mut self.cloud_editor.password),
+                    name: self.cloud_editor.name.clone(),
+                    register,
+                }))
+            }
             Control::Artist(artist) => {
                 self.page = Page::Artist;
                 self.overlay = None;
@@ -1814,10 +1787,7 @@ impl GlassUi {
                 self.discovery = m.settings.discovery >= 0.6;
             }
             Control::Close => {
-                #[cfg(windows)]
-                if self.overlay == Some(Overlay::Vps) {
-                    self.vps_editor.clear_secrets();
-                }
+                self.cloud_editor.clear_password();
                 if self.overlay == Some(Overlay::Recognition) {
                     out.push(Intent::CancelRecognition);
                 }
@@ -2127,10 +2097,6 @@ impl GlassUi {
         }
         if self.overlay == Some(Overlay::Cloud) {
             cloud::input(self, ui);
-        }
-        #[cfg(windows)]
-        if self.overlay == Some(Overlay::Vps) {
-            vps::input(self, ui);
         }
         if !ctx.wants_keyboard_input() {
             if ctx.input(|i| i.key_pressed(egui::Key::Space)) {

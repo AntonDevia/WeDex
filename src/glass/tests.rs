@@ -373,29 +373,6 @@ fn updates_open_at_the_top_after_scrolling_settings() {
     assert_eq!(body.y, 0.);
 }
 
-#[cfg(windows)]
-#[test]
-fn vps_form_keeps_focus_and_clears_secrets_on_submit_or_close() {
-    let m = fixture();
-    let mut h = Harness::new();
-    h.ui.overlay = Some(Overlay::Vps);
-    h.frame(&m, vec![]);
-    let field = h.ui.renderer.regions["VPS input/0"].0.center();
-    h.click(&m, field);
-    assert_eq!(h.ui.overlay, Some(Overlay::Vps));
-    h.ui.vps_editor.fields[0] = "203.0.113.25".into();
-    h.ui.vps_editor.fields[3] = "test-secret".into();
-    let request = h.ui.vps_editor.request(false, "My PC").unwrap();
-    assert_eq!(request.password.as_str(), "test-secret");
-    assert!(h.ui.vps_editor.fields[3].is_empty());
-    h.ui.vps_editor.fields[8] = "test-sudo".into();
-    h.frame(&m, vec![]);
-    let p = h.point(|c| matches!(c, Control::Close), 0.5);
-    h.click(&m, p);
-    assert!(h.ui.vps_editor.fields[8].is_empty());
-    assert!(h.ui.overlay.is_none());
-}
-
 #[test]
 fn phone_device_picker_is_in_player_and_cloud_settings_only_connect() {
     let _mobile = crate::platform::mobile_for_test();
@@ -558,34 +535,34 @@ fn mobile_zen_keeps_artwork_clean_and_places_working_controls_below_it() {
 }
 
 #[test]
-fn cloud_panel_fields_keep_focus_and_start_button_uses_selected_network_mode() {
-    let model = fixture();
-    let mut h = Harness::new();
-    h.ui.overlay = Some(Overlay::Cloud);
-    h.frame(&model, vec![]);
-    let start = h.point(
-        |c| {
-            matches!(
-                c,
-                Control::Cloud(crate::cloud::Action::Start { lan: false })
-            )
-        },
-        0.5,
-    );
-    let actions = h.click(&model, start);
-    assert!(actions
-        .iter()
-        .any(|a| matches!(a, Intent::Cloud(crate::cloud::Action::Start { lan: false }))));
-    h.frame(&model, vec![]);
-    let input = h.ui.renderer.regions["Cloud input/1"].0.center();
-    h.click(&model, input);
-    h.frame(&model, vec![Event::Text("wedex-cloud:fixture".into())]);
-    assert_eq!(h.ui.overlay, Some(Overlay::Cloud));
-    assert_eq!(h.ui.cloud_editor.invitation, "wedex-cloud:fixture");
-    let lan = h.point(|c| matches!(c, Control::CloudLan), 0.5);
-    h.click(&model, lan);
-    h.frame(&model, vec![]);
-    assert!(h.ui.cloud_editor.lan);
+fn cloud_panel_has_account_fields_and_no_local_server_browser_or_remote_player() {
+    for size in [vec2(1440., 960.), vec2(411., 869.)] {
+        let model = fixture();
+        let mut h = Harness::new();
+        h.size = size;
+        h.ui.overlay = Some(Overlay::Cloud);
+        h.frame(&model, vec![]);
+        let root = h.ui.last_overlay.as_ref().unwrap();
+        for label in [
+            "Локальный сервер",
+            "Запустить сервер",
+            "Пригласить браузер",
+            "Настроить VPS по SSH",
+            "Открыть пульт",
+        ] {
+            assert!(root.find(label).is_none());
+        }
+        let input = h.ui.renderer.regions["Cloud input/2"].0.center();
+        h.click(&model, input);
+        h.frame(&model, vec![Event::Text("127.0.0.1:8765".into())]);
+        assert_eq!(h.ui.overlay, Some(Overlay::Cloud));
+        assert_eq!(h.ui.cloud_editor.server, "127.0.0.1:8765");
+        let check = h.point(|c| matches!(c, Control::CloudDiscover), 0.5);
+        assert!(h
+            .click(&model, check)
+            .iter()
+            .any(|a| matches!(a, Intent::Cloud(crate::cloud::Action::Discover(_)))));
+    }
 }
 
 fn fixture() -> Model {

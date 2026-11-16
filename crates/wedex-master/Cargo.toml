@@ -1,0 +1,16 @@
+[package]
+name = "wedex-master"
+version = "0.12.0"
+edition = "2021"
+license = "MIT"
+
+
+[target.'cfg(windows)'.dependencies]
+anyhow = "1"
+eframe = { version = "0.31.1", default-features = false, features = ["default_fonts", "glow"] }
+keyring = { version = "3", features = ["windows-native"] }
+serde_json = "1"
+zeroize = "1"
+wedex-cloud = { path = "../wedex-cloud" }
+wedex-provision = { path = "../wedex-provision" }
+wedex-update = { path = "../wedex-update" }

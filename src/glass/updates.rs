@@ -38,11 +38,7 @@ pub(super) fn panel(ui: &mut GlassUi, ctx: &egui::Context, m: &Model) -> Node {
     );
     job.sections[0].format.line_height = Some(39.);
     let notes_height = ctx.fonts(|f| f.layout_job(job).size().y * 0.5).max(24.);
-    let server = s
-        .server
-        .as_ref()
-        .filter(|_| ui.cloud_view.can_update_server || ui.cloud_view.owner_access);
-    let footer_rows = usize::from(s.app.is_some()) + usize::from(server.is_some());
+    let footer_rows = usize::from(s.app.is_some());
     let reserve = footer_rows as f32 * 56.;
     let mut viewport_panel = p.clone();
     viewport_panel.height -= reserve;
@@ -88,7 +84,7 @@ pub(super) fn panel(ui: &mut GlassUi, ctx: &egui::Context, m: &Model) -> Node {
         false,
     ));
     p.children.push(view);
-    let mut y = p.height - reserve - 12.;
+    let y = p.height - reserve - 12.;
     if s.app.is_some() {
         let ready = s.ready.is_some();
         let mut button = button(
@@ -127,22 +123,6 @@ pub(super) fn panel(ui: &mut GlassUi, ctx: &egui::Context, m: &Model) -> Node {
             button.children.push(rail);
         }
         p.children.push(button);
-        y += 56.;
-    }
-    if let Some(release) = server {
-        p.children.push(button(
-            &format!("Обновить VPS · {}", release.version),
-            24.,
-            y,
-            w,
-            44.,
-            if ui.cloud_view.server_updating {
-                Control::Noop
-            } else {
-                Control::Update(crate::updates::Action::Server)
-            },
-            true,
-        ));
     }
     root.children.push(p);
     root

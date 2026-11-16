@@ -204,6 +204,8 @@ pub struct PairRequest {
 pub struct Credentials {
     pub device_id: String,
     pub token: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<crate::accounts::Account>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Invitation {

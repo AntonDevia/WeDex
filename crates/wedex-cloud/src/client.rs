@@ -11,6 +11,7 @@ use std::{
 };
 use tokio::sync::{mpsc, watch};
 use tokio_tungstenite::{tungstenite::Message, Connector};
+pub mod accounts;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Connection {
@@ -22,10 +23,30 @@ pub struct Connection {
 }
 impl Connection {
     pub fn server_id(&self) -> String {
-        crate::database::digest(&self.certificate)
+        match self
+            .credentials
+            .account
+            .as_ref()
+            .filter(|a| a.id != "legacy")
+        {
+            Some(a) => {
+                let identity = accounts::ServerIdentity {
+                    endpoint: self.endpoint.clone(),
+                    certificate: self.certificate.clone(),
+                };
+                crate::database::digest(&format!(
+                    "{}:{}",
+                    identity
+                        .fingerprint()
+                        .unwrap_or_else(|_| crate::database::digest(&self.certificate)),
+                    a.id
+                ))
+            }
+            None => crate::database::digest(&self.certificate),
+        }
     }
 }
-/// Only the release-update endpoints accept a native device token. No owner credential is copied to a phone.
+/// Compatibility helper for older servers. Multi-account servers reject device updates; use Master.
 pub fn blocking_update(connection: &Connection, status: bool) -> Result<serde_json::Value> {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()

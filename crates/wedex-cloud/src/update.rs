@@ -92,33 +92,7 @@ pub fn apply(data: &Path, repo: &str) -> Result<()> {
                 use std::os::unix::fs::PermissionsExt;
                 std::fs::set_permissions(&backup, std::fs::Permissions::from_mode(0o700))?;
             }
-            for name in [
-                "cloud.sqlite3",
-                "cloud.sqlite3-wal",
-                "cloud.sqlite3-shm",
-                "identity.json",
-                "private-key.pem",
-                "certificate.pem",
-            ] {
-                let from = data.join(name);
-                if from.exists() {
-                    anyhow::ensure!(
-                        !std::fs::symlink_metadata(&from)?.file_type().is_symlink(),
-                        "Нельзя копировать ссылку в резервную копию"
-                    );
-                    let mut source = regular(&from)?;
-                    let mut options = std::fs::OpenOptions::new();
-                    options.write(true).create_new(true);
-                    #[cfg(unix)]
-                    {
-                        use std::os::unix::fs::OpenOptionsExt;
-                        options.mode(0o600);
-                    }
-                    let mut target = options.open(backup.join(name))?;
-                    std::io::copy(&mut source, &mut target)?;
-                    target.sync_all()?;
-                }
-            }
+            backup_accounts(data, &backup)?;
             switch(&release_path)?;
             systemctl("start")?;
             let mut ready = false;
@@ -160,6 +134,75 @@ pub fn apply(data: &Path, repo: &str) -> Result<()> {
         let _ = status("error", &format!("{error:#}"));
     }
     result
+}
+fn backup_file(from: &Path, to: &Path) -> Result<()> {
+    if !from.exists() {
+        return Ok(());
+    }
+    anyhow::ensure!(
+        !std::fs::symlink_metadata(from)?.file_type().is_symlink(),
+        "Нельзя копировать ссылку в резервную копию"
+    );
+    let mut source = regular(from)?;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut target = options.open(to)?;
+    std::io::copy(&mut source, &mut target)?;
+    target.sync_all()?;
+    Ok(())
+}
+fn backup_accounts(data: &Path, backup: &Path) -> Result<()> {
+    for name in [
+        "cloud.sqlite3",
+        "cloud.sqlite3-wal",
+        "cloud.sqlite3-shm",
+        "accounts.sqlite3",
+        "accounts.sqlite3-wal",
+        "accounts.sqlite3-shm",
+        "identity.json",
+        "private-key.pem",
+        "certificate.pem",
+    ] {
+        backup_file(&data.join(name), &backup.join(name))?;
+    }
+    let accounts = data.join("accounts");
+    if accounts.exists() {
+        anyhow::ensure!(
+            !std::fs::symlink_metadata(&accounts)?
+                .file_type()
+                .is_symlink(),
+            "Нельзя копировать ссылку на каталог аккаунтов"
+        );
+        for item in std::fs::read_dir(accounts)? {
+            let item = item?;
+            let name = item.file_name();
+            anyhow::ensure!(
+                uuid::Uuid::parse_str(&name.to_string_lossy()).is_ok()
+                    && item.file_type()?.is_dir(),
+                "Некорректный каталог аккаунта"
+            );
+            let target = backup.join("accounts").join(name);
+            std::fs::create_dir_all(&target)?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o700))?;
+            }
+            for file in [
+                "personal.sqlite3",
+                "personal.sqlite3-wal",
+                "personal.sqlite3-shm",
+            ] {
+                backup_file(&item.path().join(file), &target.join(file))?;
+            }
+        }
+    }
+    Ok(())
 }
 fn systemctl(action: &str) -> Result<()> {
     anyhow::ensure!(
@@ -213,4 +256,44 @@ fn switch(path: &Path) -> Result<()> {
 #[cfg(not(unix))]
 fn switch(_: &Path) -> Result<()> {
     anyhow::bail!("Обновление VPS доступно только в Linux")
+}
+
+#[cfg(test)]
+mod account_backup_tests {
+    use super::*;
+    #[test]
+    fn complete_identity_and_each_account_are_backed_up_without_modifying_live_data() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("live");
+        let backup = temp.path().join("backup");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::create_dir_all(&backup).unwrap();
+        let a = uuid::Uuid::new_v4().to_string();
+        let b = uuid::Uuid::new_v4().to_string();
+        for (name, contents) in [
+            ("accounts.sqlite3".to_string(), "registry"),
+            ("cloud.sqlite3".into(), "legacy"),
+            (format!("accounts/{a}/personal.sqlite3"), "first"),
+            (format!("accounts/{b}/personal.sqlite3"), "second"),
+        ] {
+            let path = source.join(name);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, contents).unwrap();
+        }
+        backup_accounts(&source, &backup).unwrap();
+        for (path, expected) in [
+            ("accounts.sqlite3".to_string(), "registry"),
+            (format!("accounts/{a}/personal.sqlite3"), "first"),
+            (format!("accounts/{b}/personal.sqlite3"), "second"),
+        ] {
+            assert_eq!(
+                std::fs::read_to_string(backup.join(&path)).unwrap(),
+                expected
+            );
+            assert_eq!(
+                std::fs::read_to_string(source.join(path)).unwrap(),
+                expected
+            );
+        }
+    }
 }

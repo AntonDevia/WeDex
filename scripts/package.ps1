@@ -2,13 +2,14 @@ $ErrorActionPreference = 'Stop'
 Set-Location -LiteralPath (Split-Path -Parent $PSScriptRoot)
 $cargo = Join-Path $env:USERPROFILE '.cargo\bin\cargo.exe'
 if (-not (Test-Path -LiteralPath $cargo)) { $cargo = 'cargo' }
-& $cargo build --release --locked --bin sonora
+& $cargo build --release --locked --workspace --bin sonora --bin wedex-master
 if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
 $versionLine = Get-Content -LiteralPath 'Cargo.toml' | Where-Object { $_ -match '^version = "([^"]+)"' } | Select-Object -First 1
 if ($versionLine -notmatch '^version = "([^"]+)"') { throw 'Package version missing' }
 $outputDir = Join-Path (Get-Location) ('dist\WeDex-' + $Matches[1])
 New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
 Copy-Item -LiteralPath 'target\release\sonora.exe' -Destination (Join-Path $outputDir 'WeDex-Sonora.exe')
+Copy-Item -LiteralPath 'target\release\wedex-master.exe' -Destination (Join-Path $outputDir 'WeDex-Master.exe')
 foreach ($name in @('README.md','LICENSE','THIRD_PARTY.md')) { Copy-Item -LiteralPath $name -Destination $outputDir }
 Copy-Item -LiteralPath 'docs' -Destination $outputDir -Recurse -Force
 $licenseDir = Join-Path $outputDir 'licenses'

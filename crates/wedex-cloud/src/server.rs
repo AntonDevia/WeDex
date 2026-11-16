@@ -23,6 +23,8 @@ use std::{
     time::Duration,
 };
 use tokio::sync::{broadcast, mpsc};
+mod accounts;
+mod catalog;
 
 #[derive(Clone)]
 pub struct Config {
@@ -35,14 +37,18 @@ struct Connected {
     outgoing: mpsc::Sender<ServerMessage>,
 }
 struct Hub {
+    catalog: Arc<catalog::Catalog>,
     data_dir: PathBuf,
     update_repo: String,
     db: Database,
     owner_hash: String,
     connected: Mutex<HashMap<String, Connected>>,
     changes: broadcast::Sender<()>,
-    pairing_rate: Mutex<(u64, u32)>,
-    hitmo_mirror: Mutex<Option<crate::mirror::HitmoMirror>>,
+    hitmo_mirror: Arc<Mutex<Option<crate::mirror::HitmoMirror>>>,
+    accounts: Option<crate::accounts::Registry>,
+    tenants: Mutex<HashMap<String, Arc<Hub>>>,
+    auth_slots: Arc<tokio::sync::Semaphore>,
+    auth_rate: Mutex<HashMap<IpAddr, (u64, u32)>>,
 }
 
 pub struct RunningServer {
@@ -176,27 +182,36 @@ pub fn start_configured(
     let db = Database::open(&config.data_dir.join("cloud.sqlite3"))?;
     let (changes, _) = broadcast::channel(16);
     let hub = Arc::new(Hub {
+        catalog: Arc::new(catalog::Catalog::new()?),
         data_dir: config.data_dir.clone(),
         update_repo: wedex_update::repository(repo)?,
         db,
         owner_hash: digest(&identity.owner),
         connected: Mutex::new(HashMap::new()),
         changes,
-        pairing_rate: Mutex::new((0, 0)),
-        hitmo_mirror: Mutex::new(
+        accounts: Some(crate::accounts::Registry::open(
+            &config.data_dir.join("accounts.sqlite3"),
+        )?),
+        tenants: Mutex::new(HashMap::new()),
+        auth_slots: Arc::new(tokio::sync::Semaphore::new(2)),
+        auth_rate: Mutex::new(HashMap::new()),
+        hitmo_mirror: Arc::new(Mutex::new(
             std::fs::read(config.data_dir.join("hitmo-mirror.json"))
                 .ok()
                 .filter(|b| b.len() <= 8192)
                 .and_then(|b| serde_json::from_slice::<crate::mirror::HitmoMirror>(&b).ok())
                 .filter(|m| m.valid(now_ms())),
-        ),
+        )),
     });
     let routes = Router::new()
-        .route("/", get(|| async { Html(include_str!("remote.html")) }))
+        .route("/", get(|| async { Html("WeDex Cloud") }))
         .route("/medeo.ttf", get(|| async { ([(header::CONTENT_TYPE, "font/ttf")],
             include_bytes!("../../../assets/fonts/medeo/MedeoSans-Medium.ttf").as_slice()) }))
         .route("/health", get(|| async { Json(serde_json::json!({"service":"wedex", "api_version":API_VERSION, "version":env!("CARGO_PKG_VERSION")})) }))
         .route("/api/pair", post(pair))
+        .route("/api/accounts/register", post(accounts::register))
+        .route("/api/accounts/login", post(accounts::login))
+        .route("/api/hitmo/search", get(catalog::search))
         .route("/api/invitations", post(invitation))
         .route("/api/update",post(request_update))
         .route("/api/update/status",get(update_status))
@@ -267,7 +282,7 @@ pub fn start_configured(
                 let _ = ready_tx.send(Ok(()));
                 if let Err(e) = axum_server::from_tcp_rustls(listener, tls)
                     .handle(worker_handle)
-                    .serve(routes.into_make_service())
+                    .serve(routes.into_make_service_with_connect_info::<SocketAddr>())
                     .await
                 {
                     eprintln!("WeDex server transport: {e}");
@@ -355,62 +370,65 @@ fn owner(hub: &Hub, headers: &HeaderMap) -> bool {
         .and_then(|h| h.strip_prefix("Bearer "))
         .is_some_and(|token| digest(token) == hub.owner_hash)
 }
-// Native peers are paired by the owner and already have access to the encrypted
-// account vault. This narrowly permits signed release updates, never SSH/admin operations.
+// Shared infrastructure is administered only by the separate Master application.
 fn may_update(hub: &Hub, headers: &HeaderMap) -> bool {
     owner(hub, headers)
-        || headers
-            .get(header::AUTHORIZATION)
-            .and_then(|h| h.to_str().ok())
-            .and_then(|h| h.strip_prefix("Bearer "))
-            .and_then(|token| hub.db.authenticate(token).ok().flatten())
-            .is_some_and(|d| d.can_play)
 }
 async fn pair(
     State(hub): State<Arc<Hub>>,
+    axum::extract::ConnectInfo(peer): axum::extract::ConnectInfo<SocketAddr>,
     Json(request): Json<PairRequest>,
 ) -> ApiResult<Credentials> {
-    {
-        let mut rate = hub.pairing_rate.lock().unwrap();
-        let minute = now_ms() / 60000;
-        if rate.0 != minute {
-            *rate = (minute, 0);
-        }
-        rate.1 += 1;
-        if rate.1 > 30 {
-            return Err(failure(
-                StatusCode::TOO_MANY_REQUESTS,
-                "Повторите подключение через минуту",
-            ));
-        }
+    if !accounts::rate(&hub, peer.ip()) {
+        return Err(failure(
+            StatusCode::TOO_MANY_REQUESTS,
+            "Повторите подключение через минуту",
+        ));
     }
-    match hub.db.pair(&request) {
-        Ok(credentials) => {
-            let _ = hub.changes.send(());
-            Ok(Json(credentials))
+    let result = (|| -> Result<Credentials> {
+        let tenant = hub.for_invite(&request.code)?;
+        let mut credentials = tenant.db.pair(&request)?;
+        if let Some(id) = hub.registry()?.route_invite(&request.code)? {
+            credentials.account = hub.registry()?.account(&id)?;
+            hub.registry()?.device(&credentials.token, &id)?;
+        } else {
+            credentials.account = hub.registry()?.account("legacy")?;
         }
-        Err(_) => Err(failure(
+        let _ = tenant.changes.send(());
+        Ok(credentials)
+    })();
+    result.map(Json).map_err(|_| {
+        failure(
             StatusCode::BAD_REQUEST,
             "Приглашение недействительно или имя устройства некорректно",
-        )),
-    }
+        )
+    })
 }
+
 async fn invitation(
     State(hub): State<Arc<Hub>>,
     headers: HeaderMap,
 ) -> ApiResult<serde_json::Value> {
-    if !owner(&hub, &headers) {
-        return Err(failure(
-            StatusCode::UNAUTHORIZED,
-            "Требуется доступ владельца",
-        ));
-    }
-    internal(
-        hub.db
-            .invitation()
-            .map(|code| serde_json::json!({"code":code,"expires_ms":now_ms()+600_000})),
-    )
+    let (tenant, account) = if owner(&hub, &headers) {
+        (hub.clone(), None)
+    } else {
+        let (tenant, device, account) = hub
+            .authorize(&headers)
+            .map_err(|_| failure(StatusCode::UNAUTHORIZED, "Требуется вход в аккаунт"))?;
+        if !device.can_play {
+            return Err(failure(StatusCode::FORBIDDEN, "Только устройства WeDex"));
+        }
+        (tenant, account)
+    };
+    internal((|| -> Result<serde_json::Value> {
+        let code = tenant.db.invitation()?;
+        if let Some(account) = account {
+            hub.registry()?.invite(&code, &account.id)?;
+        }
+        Ok(serde_json::json!({"code":code,"expires_ms":now_ms()+600_000}))
+    })())
 }
+
 fn revoke(hub: &Hub, id: &str) -> Result<()> {
     hub.db.revoke(id)?;
     if let Some(connection) = hub.connected.lock().unwrap().remove(id) {
@@ -426,14 +444,20 @@ async fn revoke_device(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> ApiResult<bool> {
-    if !owner(&hub, &headers) {
-        return Err(failure(
-            StatusCode::UNAUTHORIZED,
-            "Требуется доступ владельца",
-        ));
-    }
-    internal(revoke(&hub, &id).map(|_| true))
+    let tenant = if owner(&hub, &headers) {
+        hub.clone()
+    } else {
+        let (tenant, device, _) = hub
+            .authorize(&headers)
+            .map_err(|_| failure(StatusCode::UNAUTHORIZED, "Требуется вход в аккаунт"))?;
+        if !device.can_play {
+            return Err(failure(StatusCode::FORBIDDEN, "Только устройства WeDex"));
+        }
+        tenant
+    };
+    internal(revoke(&tenant, &id).map(|_| true))
 }
+
 async fn upgrade(State(hub): State<Arc<Hub>>, ws: WebSocketUpgrade) -> Response {
     ws.max_message_size(256 * 1024)
         .max_frame_size(256 * 1024)
@@ -481,6 +505,10 @@ async fn connection(mut socket: WebSocket, hub: Arc<Hub>) {
         },
         _ => return,
     };
+    let hub = match hub.for_token(&token) {
+        Ok(hub) => hub,
+        Err(_) => return,
+    };
     let mut device = match hub.db.authenticate(&token) {
         Ok(Some(device)) => device,
         _ => return,
@@ -504,16 +532,11 @@ async fn connection(mut socket: WebSocket, hub: Arc<Hub>) {
         &mut socket,
         &ServerMessage::Welcome {
             version: env!("CARGO_PKG_VERSION").into(),
-            capabilities: if crate::update::enabled() {
-                vec![
-                    "connections-vault".into(),
-                    "library-sync-v1".into(),
-                    "server-update".into(),
-                    "device-server-update".into(),
-                ]
-            } else {
-                vec!["connections-vault".into(), "library-sync-v1".into()]
-            },
+            capabilities: vec![
+                "connections-vault".into(),
+                "library-sync-v1".into(),
+                "accounts-v1".into(),
+            ],
             device_id: id.clone(),
             api_version: API_VERSION,
         },

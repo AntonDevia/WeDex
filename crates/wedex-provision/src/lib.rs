@@ -80,6 +80,7 @@ pub enum Event {
         fingerprint: String,
     },
     Bootstrap(Owner),
+    Managed(Owner),
     Complete(Connection),
     Failed(String),
 }
@@ -90,6 +91,12 @@ pub struct Worker {
 }
 impl Worker {
     pub fn start(request: Request, binary: &'static [u8]) -> Result<Self> {
+        Self::start_mode(request, binary, false)
+    }
+    pub fn start_master(request: Request, binary: &'static [u8]) -> Result<Self> {
+        Self::start_mode(request, binary, true)
+    }
+    fn start_mode(request: Request, binary: &'static [u8], master: bool) -> Result<Self> {
         request.validate()?;
         if !request.connect_only {
             validate_binary(binary)?;
@@ -107,7 +114,7 @@ impl Worker {
                         .build()?;
                     runtime.block_on(async {
                         tokio::select! {
-                            result=run(&request, binary, sender.clone(), trust, stop.clone())=>result,
+                            result=run(&request, binary, sender.clone(), trust, stop.clone(), master)=>result,
                             _=async {
                                 while !stop.load(Ordering::Relaxed) {tokio::time::sleep(Duration::from_millis(50)).await;}
                             }=>Err(anyhow::anyhow!("Установка отменена; выполненные шаги и данные сервера сохранены")),
@@ -174,6 +181,7 @@ async fn run(
     events: mpsc::UnboundedSender<Event>,
     trust: oneshot::Receiver<bool>,
     cancelled: Arc<AtomicBool>,
+    master: bool,
 ) -> Result<()> {
     let step = |text: &str| {
         let _ = events.send(Event::Step(text.into()));
@@ -312,7 +320,14 @@ async fn run(
         bootstrap.owner.endpoint == expected && bootstrap.invitation.endpoint == expected,
         "Публичный адрес или порт отличаются от установленной конфигурации"
     );
-    let _ = events.send(Event::Bootstrap(bootstrap.owner));
+    let _ = events.send(Event::Bootstrap(bootstrap.owner.clone()));
+    if master {
+        step("Проверяем защищённое подключение администратора");
+        let owner = bootstrap.owner.clone();
+        tokio::task::spawn_blocking(move || owner.blocking_version()).await??;
+        let _ = events.send(Event::Managed(bootstrap.owner));
+        return Ok(());
+    }
     step("Проверяем HTTPS и WebSocket с этого ПК");
     if let Some(connection) = request.previous.as_ref().filter(|c| {
         c.endpoint == bootstrap.invitation.endpoint

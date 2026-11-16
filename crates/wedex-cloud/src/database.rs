@@ -25,7 +25,7 @@ impl Database {
             db.pragma_query_value(None, "user_version", |r| r.get::<_, u32>(0))? <= 1,
             "База создана более новой версией сервера"
         );
-        db.execute_batch("PRAGMA journal_mode=WAL;
+        db.execute_batch("PRAGMA journal_mode=WAL; PRAGMA cache_size=-256;
             CREATE TABLE IF NOT EXISTS devices(id TEXT PRIMARY KEY, token TEXT UNIQUE NOT NULL,
                 name TEXT NOT NULL, can_play INTEGER NOT NULL, revoked INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE IF NOT EXISTS invitations(code TEXT PRIMARY KEY, expires INTEGER NOT NULL);
@@ -106,6 +106,7 @@ impl Database {
             "Достигнут лимит устройств"
         );
         let credentials = Credentials {
+            account: None,
             device_id: uuid::Uuid::new_v4().to_string(),
             token: secret(),
         };
@@ -141,6 +142,37 @@ impl Database {
                 },
             )
             .optional()?)
+    }
+    /// Used only after account-password verification. A remembered device token
+    /// proves installation identity even after revocation; rotate it on re-login.
+    pub fn login_device(&self, previous: Option<&str>, name: &str) -> Result<Credentials> {
+        if let Some(previous) = previous.filter(|s| s.len() <= 128) {
+            let db = self.0.lock().unwrap();
+            let id: Option<String> = db
+                .query_row(
+                    "SELECT id FROM devices WHERE token=?",
+                    [digest(previous)],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            if let Some(id) = id {
+                let credentials = Credentials {
+                    device_id: id,
+                    token: secret(),
+                    account: None,
+                };
+                db.execute(
+                    "UPDATE devices SET token=?1,name=?2,revoked=0 WHERE id=?3",
+                    params![digest(&credentials.token), name, credentials.device_id],
+                )?;
+                return Ok(credentials);
+            }
+        }
+        self.pair(&PairRequest {
+            code: self.invitation()?,
+            name: name.into(),
+            can_play: true,
+        })
     }
     pub fn devices(&self) -> Result<Vec<Device>> {
         let db = self.0.lock().unwrap();

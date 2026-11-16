@@ -1,6 +1,6 @@
 use wedex_cloud::{admin, client, server};
 #[tokio::test(flavor = "multi_thread")]
-async fn paired_native_device_may_update_but_browser_revoked_and_unpaired_devices_cannot() {
+async fn only_infrastructure_owner_may_update_neither_native_nor_browser_devices_can() {
     let dir = tempfile::tempdir().unwrap();
     let server = server::start(server::Config {
         data_dir: dir.path().into(),
@@ -28,7 +28,7 @@ async fn paired_native_device_may_update_but_browser_revoked_and_unpaired_device
             .await
             .unwrap()
             .status(),
-        200
+        401
     );
     for token in [&browser.credentials.token, "not-a-token"] {
         assert_eq!(
@@ -51,7 +51,7 @@ async fn paired_native_device_may_update_but_browser_revoked_and_unpaired_device
             401
         );
     }
-    // A local test server has no privileged updater: authentication passes, installation stays disabled.
+    // Native account devices cannot administer a shared server.
     assert_eq!(
         http.post(format!("{}api/update", server.endpoint))
             .bearer_auth(&phone.credentials.token)
@@ -60,7 +60,7 @@ async fn paired_native_device_may_update_but_browser_revoked_and_unpaired_device
             .await
             .unwrap()
             .status(),
-        409
+        401
     );
     let owner = admin::Owner {
         endpoint: server.endpoint.clone(),
