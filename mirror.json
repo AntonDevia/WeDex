@@ -6,34 +6,34 @@
   "alternatives": [
     "https://ru.hitmox.org/"
   ],
-  "checked_at_ms": 1794926222962,
+  "checked_at_ms": 1794956302017,
   "discovery": "globalping_redirect_with_ru_validation",
-  "source_measurement": "2itFBXUpJRGNC4OyW00021WN2",
+  "source_measurement": "2hKKTGKFBP8jKIr9000021WV8",
   "discovered_origin": "https://ru.hitmox.org/",
-  "discovered_at_ms": 1794926220011,
+  "discovered_at_ms": 1794956299386,
   "ru_checks": [
     {
       "origin": "https://ru.hitmox.net/",
-      "measurement": "2sUsATWii823QIOXI00021WN3",
+      "measurement": "2ZN1HOVJhVYA11h4c00021WV8",
       "probes": [
         {
           "country": "RU",
-          "network": "GENERAL IT RUS",
-          "asn": 215455,
+          "network": "Limited Company Information and Consulting Agency",
+          "asn": 31357,
           "http_status": 200,
           "ok": true
         },
         {
           "country": "RU",
-          "network": "Sun Network Company",
-          "asn": 328543,
+          "network": "Timeweb",
+          "asn": 9123,
           "http_status": 200,
           "ok": true
         },
         {
           "country": "RU",
-          "network": "ER-Telecom Holding",
-          "asn": 51570,
+          "network": "MTS",
+          "asn": 8359,
           "http_status": 200,
           "ok": true
         }
