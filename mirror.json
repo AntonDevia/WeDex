@@ -4,29 +4,30 @@
   "source": "https://hitmos.pro/",
   "origin": "https://ru.hitmox.net/",
   "alternatives": [
+    "https://ru.hitmoxx.com/",
     "https://ru.hitmox.org/"
   ],
-  "checked_at_ms": 1795011276306,
+  "checked_at_ms": 1795039708382,
   "discovery": "globalping_redirect_with_ru_validation",
-  "source_measurement": "22lnnFc2qhMIv1Ay300021Wju",
-  "discovered_origin": "https://ru.hitmox.org/",
-  "discovered_at_ms": 1795011273436,
+  "source_measurement": "2Utzf6KRpOhM1qkhX00021WrY",
+  "discovered_origin": "https://ru.hitmoxx.com/",
+  "discovered_at_ms": 1795039705336,
   "ru_checks": [
     {
       "origin": "https://ru.hitmox.net/",
-      "measurement": "2QpjZ7yVzxKXVz1ZB00021Wju",
+      "measurement": "2IkyItTFUBfECgu0C00021WrY",
       "probes": [
         {
           "country": "RU",
-          "network": "MTS",
-          "asn": 8359,
+          "network": "SERV.HOST GROUP",
+          "asn": 207957,
           "http_status": 200,
           "ok": true
         },
         {
           "country": "RU",
-          "network": "Timeweb",
-          "asn": 9123,
+          "network": "MTS",
+          "asn": 8359,
           "http_status": 200,
           "ok": true
         },
