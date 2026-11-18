@@ -6,23 +6,16 @@
   "alternatives": [
     "https://ru.hitmox.org/"
   ],
-  "checked_at_ms": 1794976305374,
+  "checked_at_ms": 1795011276306,
   "discovery": "globalping_redirect_with_ru_validation",
-  "source_measurement": "2F4zp0VdE3F3iX7XQ00021WaV",
+  "source_measurement": "22lnnFc2qhMIv1Ay300021Wju",
   "discovered_origin": "https://ru.hitmox.org/",
-  "discovered_at_ms": 1794976302285,
+  "discovered_at_ms": 1795011273436,
   "ru_checks": [
     {
       "origin": "https://ru.hitmox.net/",
-      "measurement": "2NMzETmXqZpNQxmph00021WaV",
+      "measurement": "2QpjZ7yVzxKXVz1ZB00021Wju",
       "probes": [
-        {
-          "country": "RU",
-          "network": "Limited Company Information and Consulting Agency",
-          "asn": 31357,
-          "http_status": 200,
-          "ok": true
-        },
         {
           "country": "RU",
           "network": "MTS",
@@ -32,8 +25,15 @@
         },
         {
           "country": "RU",
-          "network": "Moscow city telephone network",
-          "asn": 25513,
+          "network": "Timeweb",
+          "asn": 9123,
+          "http_status": 200,
+          "ok": true
+        },
+        {
+          "country": "RU",
+          "network": "Limited Company Information and Consulting Agency",
+          "asn": 31357,
           "http_status": 200,
           "ok": true
         }
