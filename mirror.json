@@ -6,15 +6,15 @@
   "alternatives": [
     "https://ru.hitmox.org/"
   ],
-  "checked_at_ms": 1794956302017,
+  "checked_at_ms": 1794976305374,
   "discovery": "globalping_redirect_with_ru_validation",
-  "source_measurement": "2hKKTGKFBP8jKIr9000021WV8",
+  "source_measurement": "2F4zp0VdE3F3iX7XQ00021WaV",
   "discovered_origin": "https://ru.hitmox.org/",
-  "discovered_at_ms": 1794956299386,
+  "discovered_at_ms": 1794976302285,
   "ru_checks": [
     {
       "origin": "https://ru.hitmox.net/",
-      "measurement": "2ZN1HOVJhVYA11h4c00021WV8",
+      "measurement": "2NMzETmXqZpNQxmph00021WaV",
       "probes": [
         {
           "country": "RU",
@@ -25,15 +25,15 @@
         },
         {
           "country": "RU",
-          "network": "Timeweb",
-          "asn": 9123,
+          "network": "MTS",
+          "asn": 8359,
           "http_status": 200,
           "ok": true
         },
         {
           "country": "RU",
-          "network": "MTS",
-          "asn": 8359,
+          "network": "Moscow city telephone network",
+          "asn": 25513,
           "http_status": 200,
           "ok": true
         }
