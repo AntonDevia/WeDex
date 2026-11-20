@@ -605,7 +605,7 @@ impl Renderer {
         }
         if let Some(asset) = &n.asset {
             if let Some((texture, size)) = self.texture(p.ctx(), asset) {
-                let tint = if asset == "wordmark" {
+                let tint = if matches!(asset.as_str(), "wordmark" | "app-symbol") {
                     Color32::WHITE.gamma_multiply(alpha)
                 } else {
                     rgba(&n.tint, alpha)

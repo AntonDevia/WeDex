@@ -351,6 +351,9 @@ impl App {
         if self.query.trim().is_empty() {
             return;
         }
+        self.search_id += 1;
+        self.artist_request = self.artist_request.wrapping_add(1);
+        self.artist = None;
         if self.settings.offline_only || crate::network::state() == crate::network::State::Offline {
             let query = crate::model::normalize(&self.query);
             self.results = self
@@ -366,15 +369,12 @@ impl App {
             self.message.clear();
             return;
         }
-        self.search_id += 1;
         let id = self.search_id;
         let query = self.query.trim().to_owned();
         let all = self.all_sources;
         self.searching = true;
         self.results.clear();
         self.artists.clear();
-        self.artist_request = self.artist_request.wrapping_add(1);
-        self.artist = None;
         self.notices.clear();
         let tx = self.tx.clone();
         self.job(move |s| {
@@ -1868,6 +1868,35 @@ impl App {
                     self.load_artist_page();
                 }
             }
+            Intent::ArtistFromSearch(track) => {
+                self.artist_request = self.artist_request.wrapping_add(1);
+                let name = track.artist.trim().to_owned();
+                let normalized = crate::model::normalize(&name);
+                let mut keys = HashSet::from([track.key()]);
+                let mut tracks = vec![track];
+                tracks.extend(
+                    self.results
+                        .iter()
+                        .filter(|t| {
+                            crate::model::normalize(&t.artist) == normalized && keys.insert(t.key())
+                        })
+                        .cloned(),
+                );
+                self.artist = Some(crate::model::ArtistCatalog {
+                    artist: crate::model::Artist {
+                        id: String::new(),
+                        name,
+                        cover: None,
+                        tracks: Some(tracks.len()),
+                        listeners: None,
+                    },
+                    total: Some(tracks.len()),
+                    tracks,
+                    next_page: None,
+                    loading: false,
+                    failed: false,
+                });
+            }
             Intent::ArtistMore => {
                 if self.preview_status.is_none() {
                     self.load_artist_page();
@@ -2705,6 +2734,27 @@ mod tests {
         assert!(app.sonora_ready);
         assert_eq!(app.queue.len(), 1);
     }
+    #[test]
+    fn player_artist_catalog_falls_back_to_tracks_by_the_same_artist() {
+        let mut app = app();
+        let seed = app.favorites[0].clone();
+        let mut matching = seed.clone();
+        matching.id = "matching".into();
+        matching.artist = seed.artist.to_uppercase();
+        let mut other = matching.clone();
+        other.id = "other".into();
+        other.artist = format!("{} Tribute", seed.artist);
+        app.results = vec![other, matching.clone(), seed.clone()];
+
+        app.local_action(Intent::ArtistFromSearch(seed.clone()));
+
+        let catalog = app.artist.unwrap();
+        assert_eq!(catalog.artist.name, seed.artist);
+        assert_eq!(catalog.tracks, [seed, matching]);
+        assert_eq!(catalog.total, Some(2));
+        assert!(catalog.next_page.is_none());
+    }
+
     #[test]
     fn artist_catalog_ignores_stale_requests_and_keeps_pagination_retryable() {
         let mut app = app();

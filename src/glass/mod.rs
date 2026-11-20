@@ -98,6 +98,7 @@ pub enum Intent {
     Update(crate::updates::Action),
     Cloud(crate::cloud::Action),
     Artist(model::Artist),
+    ArtistFromSearch(Track),
     ArtistMore,
     Theme(ThemePreference),
     Navigate(Page),
@@ -152,6 +153,7 @@ pub(super) enum Control {
     CloudDiscover,
     CloudAccount(bool),
     Artist(model::Artist),
+    PlayerArtist(Track),
     ArtistMore,
     ArtistSources(String),
     ArtistTrack(usize),
@@ -284,6 +286,7 @@ pub struct GlassUi {
     pub recognized: Option<Track>,
     query: String,
     submitted_query: String,
+    artist_from_player: Option<Track>,
     external_query: String,
     search_filter: usize,
     library_selection: usize,
@@ -376,6 +379,7 @@ impl GlassUi {
             recognized: None,
             query: String::new(),
             submitted_query: String::new(),
+            artist_from_player: None,
             external_query: String::new(),
             search_filter: 0,
             library_selection: 0,
@@ -467,6 +471,24 @@ impl GlassUi {
             .track
             .as_ref()
             .or_else(|| m.cursor.and_then(|i| m.queue.get(i)))
+    }
+
+    fn playback_time(&self, m: &Model) -> (f32, f32) {
+        let duration = if m.status.duration > 0. {
+            m.status.duration
+        } else {
+            self.current(m).map(|t| t.duration as f32).unwrap_or(0.)
+        };
+        (self.seek_preview.unwrap_or(m.status.position), duration)
+    }
+
+    fn mini_timeline(&self, root: &mut Node, m: &Model) {
+        if self.layout.mobile {
+            if let Some(dock) = root.find_mut("Floating player") {
+                let (position, duration) = self.playback_time(m);
+                panels::playback_progress(dock, position, duration);
+            }
+        }
     }
     fn source(track: &Track) -> String {
         track.cover.clone().unwrap_or_else(|| "missing".into())
@@ -780,16 +802,12 @@ impl GlassUi {
                 Self::slider(n, m.settings.volume);
             }
             if let Some(timeline) = dock.find_mut("Timeline") {
-                let duration = if m.status.duration > 0. {
-                    m.status.duration
-                } else {
-                    current.map(|t| t.duration as f32).unwrap_or(0.)
-                };
+                let (position, duration) = self.playback_time(m);
                 if let Some(n) = timeline.find_mut("Seek") {
                     Self::slider(
                         n,
                         if duration > 0. {
-                            self.seek_preview.unwrap_or(m.status.position) / duration
+                            position / duration
                         } else {
                             0.
                         },
@@ -798,9 +816,7 @@ impl GlassUi {
                 }
                 if let Some(n) = timeline.find_mut("Time labels") {
                     n.texts(&[
-                        &model::duration(
-                            self.seek_preview.unwrap_or(m.status.position).max(0.) as u64
-                        ),
+                        &model::duration(position.max(0.) as u64),
                         &model::duration(duration as u64),
                     ]);
                 }
@@ -1756,11 +1772,24 @@ impl GlassUi {
                     register,
                 }))
             }
-            Control::Artist(artist) => {
-                self.page = Page::Artist;
-                self.overlay = None;
-                self.offsets.remove("artist");
-                out.push(Intent::Artist(artist));
+            Control::Artist(artist) => self.open_artist(artist, out),
+            Control::PlayerArtist(track) => {
+                let name = track.artist.trim();
+                self.zen = false;
+                self.page_from = None;
+                out.push(Intent::Zen(false));
+                out.push(Intent::Navigate(Page::Search));
+                if let Some(artist) = search::matching_artist(m, name) {
+                    self.open_artist(artist.clone(), out);
+                } else {
+                    self.query = name.into();
+                    self.search_filter = 0;
+                    self.submit_search(out);
+                    self.page = Page::Artist;
+                    self.offsets.remove("artist");
+                    out.push(Intent::ArtistFromSearch(track.clone()));
+                    self.artist_from_player = Some(track);
+                }
             }
             Control::ArtistMore => out.push(Intent::ArtistMore),
             Control::ArtistTrack(index) => {
@@ -1770,11 +1799,9 @@ impl GlassUi {
             }
             Control::ArtistSources(name) => {
                 self.page = Page::Search;
-                self.query = name.clone();
-                self.submitted_query = name.clone();
+                self.query = name;
                 self.search_filter = 2;
-                self.offsets.remove("results");
-                out.push(Intent::Search(name));
+                self.submit_search(out);
             }
             Control::Noop => {}
             Control::ResetRadio => out.push(Intent::ResetRadio),
@@ -1782,6 +1809,7 @@ impl GlassUi {
                 out.push(Intent::Theme(value));
             }
             Control::Navigate(page) => {
+                self.artist_from_player = None;
                 self.page = page;
                 self.overlay = None;
                 out.push(Intent::Navigate(page));
@@ -1843,11 +1871,7 @@ impl GlassUi {
                 }
             }
             Control::Seek => {
-                let duration = if m.status.duration > 0. {
-                    m.status.duration
-                } else {
-                    self.current(m).map(|t| t.duration as f32).unwrap_or(0.)
-                };
+                let (_, duration) = self.playback_time(m);
                 if duration > 0. {
                     out.push(Intent::Seek((local.x / size.x).clamp(0., 1.) * duration));
                 }
@@ -1952,12 +1976,7 @@ impl GlassUi {
                 self.recognized = None;
                 out.push(Intent::Recognize);
             }
-            Control::Search => {
-                if !self.query.trim().is_empty() {
-                    self.submitted_query = self.query.clone();
-                    out.push(Intent::Search(self.query.clone()));
-                }
-            }
+            Control::Search => self.submit_search(out),
             Control::Sync => out.push(Intent::Sync),
             Control::Listen(shuffle) => {
                 let tracks = if self.page == Page::Playlist {
@@ -2039,15 +2058,32 @@ impl GlassUi {
             Control::RecognizedSearch => {
                 if let Some(t) = &self.recognized {
                     self.query = t.query();
-                    self.submitted_query = self.query.clone();
                     self.page = Page::Search;
-                    out.push(Intent::Search(self.query.clone()));
+                    self.submit_search(out);
                 }
                 self.overlay = None;
             }
             Control::Open(url) => out.push(Intent::Open(url)),
         }
     }
+
+    fn submit_search(&mut self, out: &mut Vec<Intent>) {
+        if !self.query.trim().is_empty() {
+            self.artist_from_player = None;
+            self.submitted_query = self.query.clone();
+            self.offsets.remove("results");
+            out.push(Intent::Search(self.query.clone()));
+        }
+    }
+
+    fn open_artist(&mut self, artist: model::Artist, out: &mut Vec<Intent>) {
+        self.artist_from_player = None;
+        self.page = Page::Artist;
+        self.overlay = None;
+        self.offsets.remove("artist");
+        out.push(Intent::Artist(artist));
+    }
+
     fn input(
         &mut self,
         ui: &mut egui::Ui,
@@ -2057,14 +2093,11 @@ impl GlassUi {
         m: &Model,
     ) {
         let ctx = ui.ctx().clone();
-        if self.page == Page::Search && self.overlay.is_none() {
+        if self.page == Page::Search && !self.zen && self.overlay.is_none() {
             let Some((field, clip)) = self.renderer.regions.get("Search field").copied() else {
                 return;
             };
-            let rect = Rect::from_min_size(
-                field.min + vec2(44., 17.),
-                vec2((field.width() - 104.).max(40.), 22.),
-            );
+            let rect = search::query_rect(field);
             ui.set_clip_rect(clip);
             let id = egui::Id::new("music-query");
             crate::platform::text_before(&ctx, id, &mut self.query);
@@ -2094,9 +2127,7 @@ impl GlassUi {
                 && ui.input(|i| i.key_pressed(egui::Key::Enter))
                 && !self.query.trim().is_empty()
             {
-                self.submitted_query = self.query.clone();
-                self.offsets.remove("results");
-                out.push(Intent::Search(self.query.clone()));
+                self.submit_search(out);
             }
         }
         if self.overlay == Some(Overlay::Credentials) {
@@ -2286,6 +2317,20 @@ impl GlassUi {
             self.query = m.query.clone();
             self.submitted_query = m.query.clone();
         }
+        if let Some(track) = self.artist_from_player.take() {
+            let name = track.artist.trim();
+            if self.page == Page::Artist && m.query == name {
+                if self.overlay.is_some() || self.zen {
+                    self.artist_from_player = Some(track);
+                } else if let Some(artist) = search::matching_artist(m, name) {
+                    self.open_artist(artist.clone(), &mut out);
+                } else if m.searching {
+                    self.artist_from_player = Some(track);
+                } else {
+                    out.push(Intent::ArtistFromSearch(track));
+                }
+            }
+        }
         if self.recognized.is_some() && self.overlay == Some(Overlay::Recognition) && !m.recording {
             self.overlay = Some(Overlay::Recognized);
         }
@@ -2327,6 +2372,7 @@ impl GlassUi {
                     .copied()
                     .unwrap_or(0.);
                 self.layout.root(&mut background, self.page, offset);
+                self.mini_timeline(&mut background, m);
                 theme::apply(&mut background, self.dark);
                 self.zen_background = Some(background);
             }
@@ -2346,7 +2392,9 @@ impl GlassUi {
         self.page_scroll_max = if showing_zen {
             0.
         } else {
-            self.layout.root(&mut root, self.page, scroll)
+            let max = self.layout.root(&mut root, self.page, scroll);
+            self.mini_timeline(&mut root, m);
+            max
         };
         if !self.zen && matches!(self.page, Page::Library | Page::Favorites) {
             let mut downloads = panels::icon_button(
@@ -2438,6 +2486,7 @@ impl GlassUi {
         });
         if self.layout.mobile && !showing_zen {
             let held = ctx.input(|i| i.pointer.primary_down())
+                && self.touch.area == touch::Area::Mini
                 && self.touch.axis == touch::Axis::Horizontal;
             let target = if held {
                 self.touch
@@ -2454,11 +2503,7 @@ impl GlassUi {
             } else {
                 self.gesture_translation.value(0., now, self.reduced_motion)
             };
-            if let Some(n) = root.find_mut(if self.touch.area == touch::Area::Cards {
-                "Cover flow · swipe"
-            } else {
-                "Floating player"
-            }) {
+            if let Some(n) = root.find_mut("Floating player") {
                 n.move_to(n.x + dx, n.y);
             }
         }
@@ -2471,8 +2516,15 @@ impl GlassUi {
             self.dark,
         );
         if let Some(stage) = root.find_mut("Cover flow · swipe") {
+            let dragging = self.layout.mobile
+                && self.touch.area == touch::Area::Cards
+                && self.touch.axis == touch::Axis::Horizontal
+                && ctx.input(|i| i.pointer.primary_down());
+            if dragging {
+                self.layout.sonora_cards(stage, self.touch.delta.x);
+            }
             self.carousel
-                .apply(&mut stage.children, now, self.reduced_motion);
+                .apply(&mut stage.children, now, self.reduced_motion, dragging);
         }
         let mut zen_underlay = None;
         if self.layout.mobile && showing_zen {
@@ -2834,11 +2886,7 @@ impl GlassUi {
             if let Some((control, t, size)) = self.drag.clone() {
                 if ctx.input(|i| i.pointer.primary_down() || i.pointer.primary_released()) {
                     if matches!(control, Control::Seek) {
-                        let duration = if m.status.duration > 0. {
-                            m.status.duration
-                        } else {
-                            self.current(m).map(|t| t.duration as f32).unwrap_or(0.)
-                        };
+                        let (_, duration) = self.playback_time(m);
                         self.seek_preview =
                             Some((t.inverse(pointer).x / size.x).clamp(0., 1.) * duration);
                         if ctx.input(|i| i.pointer.primary_released()) {

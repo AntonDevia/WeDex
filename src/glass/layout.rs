@@ -426,7 +426,7 @@ impl Layout {
             for (i, (label, asset, control, active)) in [
                 (
                     "Sonora",
-                    "audio-lines",
+                    "app-symbol",
                     super::Control::Navigate(Page::Sonora),
                     page == Page::Sonora,
                 ),
@@ -497,6 +497,21 @@ impl Layout {
                 providers.move_to(if self.compact { 10. } else { 0. }, 8.);
             }
         }
+        if !self.compact {
+            if let Some(brand) = n.find_mut("Brand") {
+                brand
+                    .children
+                    .push(super::panels::icon("app-symbol", 8., 8., 36.));
+                if let Some(wordmark) = brand.find_mut("wedex / Wordmark") {
+                    wordmark.height *= 92. / wordmark.width;
+                    wordmark.width = 92.;
+                    wordmark.move_to(52., 8.);
+                }
+                if let Some(version) = brand.find_mut("МУЗЫКА БЛИЖЕ") {
+                    version.move_to(52., 37.);
+                }
+            }
+        }
         if self.compact {
             for child in &mut n.children {
                 child.move_to(8., child.y);
@@ -554,17 +569,17 @@ impl Layout {
     fn sonora(&self, root: &mut Node) {
         let landscape = self.mobile && self.size.x > self.size.y && self.size.y < 600.;
         let content_w = self.size.x - self.margin - self.surface_x;
-        let center = self.surface_x + content_w / 2.;
         if let Some(title) = root.find_mut("sonora") {
             title.move_to(self.main_x, 68.);
+            title.letter_spacing = serde_json::json!({"unit":"PERCENT", "value":2.5});
+            title.natural_width = 0.;
+            title.width = self.main_width.min(320.);
             if content_w < 600. {
                 title.font_size = 54.;
-                title.natural_width = 0.;
             }
             if self.size.y < 600. {
                 title.move_to(self.main_x, 68.);
                 title.font_size = 44.;
-                title.natural_width = 0.;
             }
         }
         if landscape {
@@ -586,7 +601,6 @@ impl Layout {
             if let Some(title) = root.find_mut("sonora") {
                 title.move_to(self.main_x, 20.);
                 title.font_size = 36.;
-                title.natural_width = 0.;
                 title.width = (content_w - 156.).max(100.);
             }
         }
@@ -638,42 +652,45 @@ impl Layout {
                 reason_y - 16.
             } - stage.y)
                 .max(72.);
-            let main_scale = (stage.width * if content_w < 600. { 0.60 } else { 0.30 } / 312.)
-                .min(stage.height * 0.88 / 390.)
-                .min(1.4);
-            let cx = if landscape {
-                stage.width / 2.
+            self.sonora_cards(stage, 0.);
+        }
+    }
+
+    pub(super) fn sonora_cards(&self, stage: &mut Node, drag: f32) {
+        let content_w = self.size.x - self.margin - self.surface_x;
+        let main_scale = (stage.width * if content_w < 600. { 0.60 } else { 0.30 } / 312.)
+            .min(stage.height * 0.88 / 390.)
+            .min(1.4);
+        let step = 312. * main_scale * 0.62;
+        let neighbor = if drag < 0. { 3 } else { 2 };
+        let limit = if stage.children.get(neighbor).is_some_and(|n| n.visible) {
+            1.
+        } else {
+            0.2
+        };
+        let shift = (drag / step.max(1.)).clamp(-limit, limit);
+        for (card, slot) in stage.children.iter_mut().zip([-2., 2., -1., 1., 0.]) {
+            let offset = if card.name == "Album/sonora-start" {
+                0.
             } else {
-                center - stage.x
+                slot + shift
             };
-            for (card, offset) in stage.children.iter_mut().zip([-2_i32, 2, -1, 1, 0]) {
-                let offset = if card.name == "Album/sonora-start" {
-                    0
-                } else {
-                    offset
-                };
-                let normalize = 312. / card.width;
-                card.scale_geometry(normalize);
-                let ratio = match offset.abs() {
-                    0 => 1.,
-                    1 => 0.84,
-                    _ => 0.66,
-                };
-                let scale = main_scale * ratio;
-                let angle = (-(offset.signum()) as f32
-                    * if offset.abs() == 1 { 5.0_f32 } else { 8.0 })
-                .to_radians();
-                let a = angle.cos() * scale;
-                let b = angle.sin() * scale;
-                let c = -b;
-                let d = a;
-                let x = cx + offset as f32 * 312. * main_scale * 0.62 - (a * 312. + c * 390.) / 2.;
-                let y = stage.height / 2. + offset.abs() as f32 * 10. * main_scale
-                    - (b * 312. + d * 390.) / 2.;
-                card.x = x;
-                card.y = y;
-                card.relative_transform = Some([[a, c, x], [b, d, y]]);
+            if card.width != 312. {
+                card.scale_geometry(312. / card.width);
             }
+            let distance = offset.abs();
+            let ratio = 1. - 0.16 * distance.min(1.) - 0.18 * (distance - 1.).max(0.);
+            let angle = (-offset.signum() * (5. * distance.min(1.) + 3. * (distance - 1.).max(0.)))
+                .to_radians();
+            let scale = main_scale * ratio;
+            let a = angle.cos() * scale;
+            let b = angle.sin() * scale;
+            let spacing = step * (1. + 0.16 * (1. - distance).max(0.));
+            let x = stage.width / 2. + offset * spacing - (a * 312. - b * 390.) / 2.;
+            let y = stage.height / 2. + distance * 10. * main_scale - (b * 312. + a * 390.) / 2.;
+            card.x = x;
+            card.y = y;
+            card.relative_transform = Some([[a, -b, x], [b, a, y]]);
         }
     }
     fn playlist_header(&self, n: &mut Node) {

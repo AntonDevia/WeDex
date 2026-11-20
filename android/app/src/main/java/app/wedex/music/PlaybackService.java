@@ -33,7 +33,9 @@ public final class PlaybackService extends Service {
             .setOnAudioFocusChangeListener(this::onAudioFocusChange).build();
         session = new MediaSession(this, "WeDex");
         session.setCallback(new MediaSession.Callback() {
-            @Override public void onPlay() { startForegroundService(new Intent(PlaybackService.this, PlaybackService.class).setAction("play")); }
+            // The active session already belongs to a foreground service. Deliver
+            // resume directly, including when the activity is in the background.
+            @Override public void onPlay() { WeDexActivity.nativeCommand(1, 0); }
             @Override public void onPause() { WeDexActivity.nativeCommand(2, 0); }
             @Override public void onSkipToNext() { WeDexActivity.nativeCommand(3, 0); }
             @Override public void onSkipToPrevious() { WeDexActivity.nativeCommand(4, 0); }
@@ -71,7 +73,10 @@ public final class PlaybackService extends Service {
         return PendingIntent.getForegroundService(this, code, intent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
+        boolean firstStart = !startedForeground;
         showNotification(true);
+        // Initialize transport state and request audio focus after promotion.
+        if (firstStart) refresh();
         String action = intent == null ? "" : intent.getAction();
         if ("play".equals(action)) WeDexActivity.nativeCommand(1, 0);
         if ("pause".equals(action)) WeDexActivity.nativeCommand(2, 0);

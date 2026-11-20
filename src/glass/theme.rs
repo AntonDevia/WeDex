@@ -81,6 +81,25 @@ pub fn apply(root: &mut Node, dark: bool) {
     if dark {
         apply_dark(root, false);
     }
+    root.visit(&mut |n| {
+        if n.name == "Zen seek" {
+            n.fills = if dark {
+                vec![solid([0.12, 0.11, 0.14], 0.66)]
+            } else {
+                vec![solid([1., 1., 1.], 0.62)]
+            };
+        }
+        if n.name == "Playback progress fill" {
+            let gray = if dark {
+                [0.40, 0.39, 0.42]
+            } else {
+                [0.56, 0.55, 0.58]
+            };
+            let accent = [232. / 255., 1., 163. / 255.];
+            let color = std::array::from_fn(|i| gray[i] * 0.8 + accent[i] * 0.2);
+            n.fills = vec![solid(color, if dark { 0.54 } else { 0.40 })];
+        }
+    });
 }
 fn apply_dark(n: &mut Node, on_accent: bool) {
     let accent = on_accent

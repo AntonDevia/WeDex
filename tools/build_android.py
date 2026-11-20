@@ -58,7 +58,7 @@ def main():
     (resources/'mipmap-xxxhdpi').mkdir(parents=True, exist_ok=True)
     shutil.copy2(ROOT/'assets/brand/app-icon.png', resources/'mipmap-xxxhdpi/ic_launcher.png')
     (resources/'drawable').mkdir(exist_ok=True)
-    for target, name in {'ic_play':'play','ic_pause':'pause','ic_previous':'skip-back','ic_next':'skip-forward','ic_music':'audio-lines'}.items():
+    for target, name in {'ic_play':'play','ic_pause':'pause','ic_previous':'skip-back','ic_next':'skip-forward'}.items():
         svg=ET.fromstring((ROOT/f'assets/fontawesome/{name}.svg').read_text(encoding='utf-8'))
         _,_,width,height=svg.attrib['viewBox'].split()
         paths=''.join('<path android:fillColor="#FFFFFFFF" android:pathData="'+p.attrib['d']+'"/>' for p in svg if p.tag.endswith('path'))

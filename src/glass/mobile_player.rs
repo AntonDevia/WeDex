@@ -56,42 +56,6 @@ fn artwork(source: &str, name: &str, rect: Rect, radius: f32) -> Node {
     n.fills = vec![serde_json::json!({"type":"IMAGE","source":source})];
     n
 }
-fn seek(ui: &GlassUi, m: &Model, rect: Rect) -> Node {
-    let w = rect.width();
-    let mut n = frame("Zen seek", rect.min.x, rect.min.y, w, rect.height());
-    n.command = Some(Control::Seek);
-    let position = ui.seek_preview.unwrap_or(m.status.position);
-    let fraction = (position / m.status.duration.max(1.)).clamp(0., 1.);
-    let mut rail = frame("Rail", 0., 10., w, 3.);
-    rail.corner_radius = 1.5;
-    rail.fills = vec![fill([0.5, 0.48, 0.53], 0.3)];
-    let mut progress = rail.clone();
-    progress.name = "Progress".into();
-    progress.width = w * fraction;
-    progress.fills = vec![fill([0.2, 0.18, 0.23], 0.95)];
-    let mut thumb = frame("Thumb", (w - 10.) * fraction, 6.5, 10., 10.);
-    thumb.corner_radius = 5.;
-    thumb.fills = progress.fills.clone();
-    n.children.extend([rail, progress, thumb]);
-    for (value, right) in [(position, false), (m.status.duration, true)] {
-        let seconds = value.max(0.) as u64;
-        let mut label = text(
-            &format!("{}:{:02}", seconds / 60, seconds % 60),
-            0.,
-            20.,
-            w,
-            11.,
-            false,
-        );
-        label.opacity = 0.6;
-        if right {
-            label.text_align_horizontal = "RIGHT".into();
-        }
-        n.children.push(label);
-    }
-    n
-}
-
 pub(super) fn zen(ui: &mut GlassUi, ctx: &egui::Context, m: &Model, mut root: Node) -> Node {
     let size = ui.layout.size;
     let g = Geometry::new(size);
@@ -177,7 +141,8 @@ pub(super) fn zen(ui: &mut GlassUi, ctx: &egui::Context, m: &Model, mut root: No
         13.,
         false,
     );
-    artist.opacity = 0.65;
+    artist.opacity = 0.78;
+    player_artist(&mut artist, current.as_ref());
     metadata.children.push(artist);
     if let Some(track) = &current {
         metadata.children.push(plain(
@@ -189,7 +154,7 @@ pub(super) fn zen(ui: &mut GlassUi, ctx: &egui::Context, m: &Model, mut root: No
         ));
     }
     root.children.push(metadata);
-    root.children.push(seek(ui, m, g.seek));
+    root.children.push(playback_timeline(ui, m, g.seek));
 
     let w = g.controls.width();
     let step = (w * 0.205).min(74.);

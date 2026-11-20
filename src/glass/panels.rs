@@ -17,6 +17,65 @@ pub(super) fn frame(name: &str, x: f32, y: f32, w: f32, h: f32) -> Node {
 pub(super) fn fill(rgb: [f32; 3], opacity: f32) -> serde_json::Value {
     json!({"type":"SOLID","color":{"r":rgb[0],"g":rgb[1],"b":rgb[2]},"opacity":opacity})
 }
+
+pub(super) fn playback_progress(panel: &mut Node, position: f32, duration: f32) {
+    if duration <= 0. || position <= 0. {
+        return;
+    }
+    let fraction = (position / duration).clamp(0., 1.);
+    let mut clip = frame(
+        "Playback progress",
+        0.,
+        0.,
+        panel.width * fraction,
+        panel.height,
+    );
+    clip.clips_content = true;
+    let mut fill = frame("Playback progress fill", 0., 0., panel.width, panel.height);
+    fill.corner_radius = panel.corner_radius;
+    clip.children.push(fill);
+    panel.children.insert(0, clip);
+}
+
+pub(super) fn playback_timeline(ui: &GlassUi, m: &Model, rect: Rect) -> Node {
+    let mut n = frame(
+        "Zen seek",
+        rect.min.x,
+        rect.min.y,
+        rect.width(),
+        rect.height(),
+    );
+    n.corner_radius = n.height / 2.;
+    let (position, duration) = ui.playback_time(m);
+    if duration > 0. {
+        n.command = Some(Control::Seek);
+    }
+    playback_progress(&mut n, position, duration);
+    for (time, right) in [(position, false), (duration, true)] {
+        let mut label = text(
+            &model::duration(time.max(0.) as u64),
+            12.,
+            (n.height - 16.5) / 2.,
+            n.width - 24.,
+            11.,
+            false,
+        );
+        label.opacity = 0.85;
+        if right {
+            label.text_align_horizontal = "RIGHT".into();
+        }
+        n.children.push(label);
+    }
+    n
+}
+
+pub(super) fn player_artist(label: &mut Node, track: Option<&Track>) {
+    if let Some(track) = track.filter(|t| !t.artist.trim().is_empty()) {
+        label.name = "Player artist".into();
+        label.command = Some(Control::PlayerArtist(track.clone()));
+        label.height = 26.;
+    }
+}
 pub(super) fn text(value: &str, x: f32, y: f32, w: f32, size: f32, bold: bool) -> Node {
     let mut n = Node::text_node(value, x, y, w, false);
     n.font_size = size;
@@ -696,19 +755,16 @@ pub(super) fn zen(
         let label_w = if stacked { size.x - 32. } else { side };
         let mut t = text(value, center - label_w / 2., y, label_w, font, bold);
         t.text_align_horizontal = "CENTER".into();
+        if !bold {
+            player_artist(&mut t, current);
+        }
         root.children.push(t);
     }
-    let mut seek = frame("Zen seek", center - side / 2., top + side + 100., side, 20.);
-    seek.command = Some(Control::Seek);
-    let mut rail = frame("Rail", 0., 8., side, 4.);
-    rail.corner_radius = 2.;
-    rail.fills = vec![fill([0.5, 0.48, 0.53], 0.3)];
-    let mut progress = rail.clone();
-    progress.name = "Progress".into();
-    progress.width = side
-        * (ui.seek_preview.unwrap_or(m.status.position) / m.status.duration.max(1.)).clamp(0., 1.);
-    seek.children.extend([rail, progress]);
-    root.children.push(seek);
+    root.children.push(playback_timeline(
+        ui,
+        m,
+        Rect::from_min_size(pos2(center - side / 2., top + side + 100.), vec2(side, 28.)),
+    ));
     if m.settings.lyrics_enabled {
         root.children
             .extend(self::lyrics(ui, ctx, m, true).children);

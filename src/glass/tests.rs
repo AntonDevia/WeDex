@@ -221,6 +221,133 @@ fn phone_player_swipes_open_skip_and_close_without_triggering_seek() {
 }
 
 #[test]
+fn sonora_swipe_reorders_card_depth_while_the_finger_is_held() {
+    let _mobile = crate::platform::mobile_for_test();
+    let mut m = fixture();
+    m.cursor = Some(2);
+    let mut h = Harness::new();
+    h.size = vec2(411., 838.);
+    h.frame(&m, vec![]);
+    let stage = "Cover flow · swipe";
+    let bounds = h.ui.renderer.regions[stage].0;
+    let start = bounds.center();
+    h.frame(
+        &m,
+        vec![
+            Event::PointerMoved(start),
+            Event::PointerButton {
+                pos: start,
+                button: PointerButton::Primary,
+                pressed: true,
+                modifiers: Modifiers::NONE,
+            },
+        ],
+    );
+    for (dx, incoming) in [(-90., "Album/3"), (90., "Album/1")] {
+        let actions = h.frame(&m, vec![Event::PointerMoved(start + vec2(dx, 0.))]);
+        assert_eq!(h.ui.renderer.regions[stage].0, bounds);
+        let stage = h.ui.last_root.as_ref().unwrap().find(stage).unwrap();
+        assert_eq!(stage.children.last().unwrap().name, incoming);
+        assert!(!actions
+            .iter()
+            .any(|action| matches!(action, Intent::Next | Intent::Previous)));
+    }
+    let actions = h.frame(
+        &m,
+        vec![Event::PointerButton {
+            pos: start + vec2(90., 0.),
+            button: PointerButton::Primary,
+            pressed: false,
+            modifiers: Modifiers::NONE,
+        }],
+    );
+    assert_eq!(
+        actions
+            .iter()
+            .filter(|action| matches!(action, Intent::Previous))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn phone_timeline_fills_the_player_and_seeks_throughout_its_height() {
+    let _mobile = crate::platform::mobile_for_test();
+    let m = fixture();
+    let mut h = Harness::new();
+    h.size = vec2(411., 838.);
+    for (zen, name) in [(false, "Floating player"), (true, "Zen seek")] {
+        h.ui.zen = zen;
+        h.frame(&m, vec![]);
+        let player = h.ui.last_root.as_ref().unwrap().find(name).unwrap();
+        let progress = player.find("Playback progress").unwrap();
+        assert!(progress.clips_content);
+        assert_eq!(progress.height, player.height);
+        assert!((progress.width - player.width * 0.24).abs() < 0.01);
+    }
+    let seek = h.ui.renderer.regions["Zen seek"].0;
+    let actions = h.click(&m, pos2(seek.center().x, seek.bottom() - 2.));
+    assert!(actions
+        .iter()
+        .any(|action| matches!(action, Intent::Seek(time) if (*time - 100.).abs() < 0.01)));
+}
+
+#[test]
+fn tapping_the_player_artist_opens_the_matching_catalog_from_search() {
+    let _mobile = crate::platform::mobile_for_test();
+    let mut m = fixture();
+    let name = m.status.track.as_ref().unwrap().artist.clone();
+    let mut h = Harness::new();
+    h.size = vec2(411., 838.);
+    h.ui.zen = true;
+    h.frame(&m, vec![]);
+    let p = h.point(|c| matches!(c, Control::PlayerArtist(_)), 0.5);
+    let actions = h.click(&m, p);
+    assert!(actions.iter().any(|a| matches!(a, Intent::Zen(false))));
+    assert!(actions
+        .iter()
+        .any(|a| matches!(a, Intent::Search(query) if query == &name)));
+    assert!(actions
+        .iter()
+        .any(|a| matches!(a, Intent::ArtistFromSearch(track) if track.artist == name)));
+    assert_eq!(h.ui.page, Page::Artist);
+    m.query = name.clone();
+    m.searching = true;
+    let mut hit = search_fixture().artists.remove(0);
+    hit.name = format!("{name} Tribute");
+    m.artists = vec![hit.clone()];
+    let actions = h.frame(&m, vec![]);
+    assert!(!actions.iter().any(|a| matches!(a, Intent::Artist(_))));
+    hit.id = "43".into();
+    hit.name = name.to_uppercase();
+    m.artists.push(hit);
+    let actions = h.frame(&m, vec![]);
+    assert!(actions
+        .iter()
+        .any(|a| matches!(a, Intent::Artist(artist) if artist.id == "43")));
+    assert_eq!(h.ui.page, Page::Artist);
+}
+
+#[test]
+fn compact_search_keeps_the_track_list_near_the_top() {
+    let _mobile = crate::platform::mobile_for_test();
+    let mut m = search_fixture();
+    let mut h = Harness::new();
+    h.ui.page = Page::Search;
+    h.size = vec2(411., 838.);
+    for card in ["Artist result", "Best match compact"] {
+        h.frame(&m, vec![]);
+        let root = h.ui.last_root.as_ref().unwrap();
+        let title = root.find("Search title").unwrap();
+        assert!(title.font_size <= 32. && title.y <= 16.);
+        assert!(root.find("Search field").unwrap().height <= 44.);
+        assert!(root.find(card).unwrap().height <= 56.);
+        assert!(h.ui.renderer.regions["list/results"].0.top() <= 222.);
+        m.artists.clear();
+    }
+}
+
+#[test]
 fn track_actions_download_without_starting_a_version_search() {
     let m = fixture();
     let mut h = Harness::new();
@@ -431,7 +558,10 @@ fn mobile_dock_has_only_like_and_play_and_opens_zen_from_the_track() {
             .unwrap()
             .clone();
     assert_eq!(dock.height, 64.);
-    assert_eq!(dock.children.len(), 4);
+    assert_eq!(
+        dock.children.iter().filter(|n| n.command.is_some()).count(),
+        4
+    );
     dock.visit(&mut |n| {
         if let Some(control) = &n.command {
             assert!(matches!(

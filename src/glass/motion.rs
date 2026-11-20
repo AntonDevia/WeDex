@@ -94,15 +94,25 @@ pub struct Carousel {
     from: Vec<Node>,
     shown: Vec<Node>,
     started: f64,
+    dragging: bool,
 }
 impl Carousel {
-    pub fn apply(&mut self, cards: &mut Vec<Node>, time: f64, reduced: bool) {
+    pub fn apply(&mut self, cards: &mut Vec<Node>, time: f64, reduced: bool, dragging: bool) {
         let names: Vec<String> = cards.iter().map(|n| n.name.clone()).collect();
-        if names != self.names {
+        if dragging {
+            self.from.clear();
+            self.names = names;
+            Self::sort_by_scale(cards);
+            self.shown = cards.clone();
+            self.dragging = true;
+            return;
+        }
+        if self.dragging || names != self.names {
             self.from = self.shown.clone();
             self.started = time;
             self.names = names;
         }
+        self.dragging = false;
         let progress = if reduced || self.from.is_empty() {
             1.
         } else {
@@ -136,7 +146,13 @@ impl Carousel {
                 }
             }
         }
-        shown.sort_by(|a, b| {
+        Self::sort_by_scale(&mut shown);
+        self.shown = shown.clone();
+        *cards = shown;
+    }
+
+    fn sort_by_scale(cards: &mut [Node]) {
+        cards.sort_by(|a, b| {
             let scale = |n: &Node| {
                 n.relative_transform
                     .map(|m| m[0][0].hypot(m[1][0]))
@@ -144,7 +160,5 @@ impl Carousel {
             };
             scale(a).total_cmp(&scale(b))
         });
-        self.shown = shown.clone();
-        *cards = shown;
     }
 }

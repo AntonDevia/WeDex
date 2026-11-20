@@ -14,6 +14,23 @@ const SOURCES: [(Option<Provider>, &str, &str); 5] = [
     (Some(Provider::YouTube), "YouTube", "provider-youtube"),
 ];
 
+pub(super) fn matching_artist<'a>(m: &'a Model, name: &str) -> Option<&'a model::Artist> {
+    if m.settings.offline_only || m.network == crate::network::State::Offline {
+        return None;
+    }
+    let name = model::normalize(name);
+    m.artists
+        .iter()
+        .find(|artist| model::normalize(&artist.name) == name)
+}
+
+pub(super) fn query_rect(field: Rect) -> Rect {
+    Rect::from_min_size(
+        pos2(field.min.x + 44., field.center().y - 11.),
+        vec2((field.width() - 96.).max(40.), 22.),
+    )
+}
+
 fn portrait(source: Option<&str>, x: f32, y: f32, size: f32, round: bool) -> Node {
     let mut n = frame("Artist portrait", x, y, size, size);
     n.corner_radius = if round { size / 2. } else { 14. };
@@ -43,20 +60,28 @@ fn artist_card(artist: &model::Artist, x: f32, y: f32, w: f32, h: f32) -> Node {
     let mut n = card("Artist result", x, y, w, h);
     n.id = format!("artist-result/{}", artist.id);
     n.command = Some(Control::Artist(artist.clone()));
-    let art = (h - if h < 65. { 16. } else { 24. }).max(24.);
+    let art = h - 16.;
     n.children
-        .push(portrait(artist.cover.as_deref(), 12., 12., art, true));
-    let left = art + 24.;
-    let font = if h < 65. { 14. } else { 19. };
-    if h >= 65. {
-        let mut label = text("Исполнитель", left, 14., w - left - 16., 11., false);
+        .push(portrait(artist.cover.as_deref(), 10., 8., art, true));
+    let left = art + 20.;
+    let compact = h < 54.;
+    let font = if compact { 14. } else { 17. };
+    if !compact {
+        let mut label = text(
+            "Исполнитель",
+            left,
+            h / 2. - 19.,
+            w - left - 14.,
+            10.,
+            false,
+        );
         label.opacity = 0.55;
         n.children.push(label);
     }
     n.children.push(text(
         &artist.name,
         left,
-        if h < 65. { 14. } else { 36. },
+        if compact { (h - 21.) / 2. } else { h / 2. - 4. },
         w - left - 14.,
         font,
         true,
@@ -66,23 +91,20 @@ fn artist_card(artist: &model::Artist, x: f32, y: f32, w: f32, h: f32) -> Node {
 
 fn best_match(track: &Track, x: f32, y: f32, w: f32, h: f32) -> Node {
     let mut n = card("Best match compact", x, y, w, h);
-    let art = h - 24.;
-    n.children.push(portrait(
-        Some(&GlassUi::source(track)),
-        if h < 65. { 8. } else { 12. },
-        12.,
-        art,
-        false,
-    ));
-    let left = art + 24.;
+    let art = h - 16.;
+    n.children
+        .push(portrait(Some(&GlassUi::source(track)), 10., 8., art, false));
+    let left = art + 20.;
     let width = (w - left - 58.).max(32.);
-    let mut label = text("Лучшее совпадение", left, 10., width, 10., false);
+    let has_subtitle = h >= 68.;
+    let top = if has_subtitle { 6. } else { (h - 38.) / 2. };
+    let mut label = text("Лучшее совпадение", left, top, width, 10., false);
     label.opacity = 0.55;
     n.children.push(label);
     n.children
-        .push(text(&track.title, left, 28., width, 17., true));
-    if h >= 85. {
-        let mut artist = text(&track.artist, left, 54., width, 12., false);
+        .push(text(&track.title, left, top + 15., width, 16., true));
+    if has_subtitle {
+        let mut artist = text(&track.artist, left, top + 38., width, 12., false);
         artist.opacity = 0.6;
         n.children.push(artist);
     }
@@ -120,17 +142,17 @@ pub(super) fn compose(
     let wide = l.main_width >= 620.;
     let y = if tiny {
         8.
-    } else if short {
+    } else if !wide {
+        16.
+    } else {
         24.
-    } else {
-        38.
     };
-    let title_size = if short {
+    let title_size = if !wide {
+        32.
+    } else if short {
         44.
-    } else if wide {
-        76.
     } else {
-        54.
+        60.
     };
     let mut title = text(
         "Поиск",
@@ -145,9 +167,9 @@ pub(super) fn compose(
     root.children.push(title);
 
     let field_y = if wide {
-        y + 16.
+        y + 12.
     } else {
-        y + title_size * 1.16 + if tiny { 4. } else { 8. }
+        y + title_size * 1.25 + 4.
     };
     let field_x = if wide { l.main_x + 250. } else { l.main_x };
     let field_w = if wide {
@@ -155,35 +177,51 @@ pub(super) fn compose(
     } else {
         l.main_width
     };
-    let field_h = if tiny { 48. } else { 56. };
+    let field_h = if wide { 48. } else { 44. };
     let mut field = card("Search field", field_x, field_y, field_w, field_h);
     field.command = Some(Control::Noop);
-    field.corner_radius = 28.;
-    let mut search = icon_button("search", 8., 10., 36., Control::Search, false);
+    field.corner_radius = field_h / 2.;
+    let mut search = icon_button(
+        "search",
+        6.,
+        (field_h - 36.) / 2.,
+        36.,
+        Control::Search,
+        false,
+    );
     search.fills.clear();
     field.children.push(search);
     let focused = ctx.memory(|memory| memory.has_focus(egui::Id::new("music-query")));
     if !focused {
+        let input = query_rect(Rect::from_min_size(pos2(0., 0.), vec2(field_w, field_h)));
         let mut value = text(
             if ui.query.is_empty() {
                 "Трек или исполнитель"
             } else {
                 &ui.query
             },
-            44.,
-            17.,
-            field_w - 104.,
+            input.min.x,
+            input.min.y,
+            input.width(),
             14.,
             false,
         );
         value.opacity = if ui.query.is_empty() { 0.48 } else { 1. };
         field.children.push(value);
     }
-    let mut mic = icon_button("mic", field_w - 48., 8., 40., Control::Mic, false);
+    let mut mic = icon_button(
+        "mic",
+        field_w - 46.,
+        (field_h - 40.) / 2.,
+        40.,
+        Control::Mic,
+        false,
+    );
     mic.fills.clear();
     field.children.push(mic);
     root.children.push(field);
-    let mut next_y = (field_y + field_h).max(y + title_size * 1.16) + if tiny { 3. } else { 16. };
+    let gap = if tiny { 4. } else { 8. };
+    let mut next_y = (field_y + field_h).max(y + title_size * 1.16) + gap;
 
     if results {
         let inline_artist = tiny && wide && !m.artists.is_empty();
@@ -196,10 +234,10 @@ pub(super) fn compose(
             .collect::<Vec<_>>();
         let h = if tiny {
             40.
-        } else if short {
-            76.
+        } else if wide {
+            68.
         } else {
-            96.
+            56.
         };
         let artists = m
             .artists
@@ -255,7 +293,7 @@ pub(super) fn compose(
                 root.children.push(card);
             }
             if !inline_artist {
-                next_y += h + if tiny { 8. } else { 12. };
+                next_y += h + gap;
             }
         } else if let Some(track) = tracks.first().filter(|_| !tiny) {
             root.children.push(best_match(
@@ -265,17 +303,17 @@ pub(super) fn compose(
                 l.main_width.min(560.),
                 h,
             ));
-            next_y += h + 12.;
+            next_y += h + gap;
         } else if m.searching && !tiny {
             let mut pending = card("Pending search hero", l.main_x, next_y, l.main_width, h);
             pending
                 .children
-                .push(portrait(None, 12., 12., (h - 24.).max(24.), true));
+                .push(portrait(None, 10., 8., h - 16., true));
             for (i, width) in [(0, 0.55), (1, 0.35)] {
                 let mut bar = frame(
                     "Search placeholder",
                     h,
-                    22. + i as f32 * 24.,
+                    h / 2. - 17. + i as f32 * 18.,
                     (l.main_width - h - 24.) * width,
                     10.,
                 );
@@ -284,7 +322,7 @@ pub(super) fn compose(
                 pending.children.push(bar);
             }
             root.children.push(pending);
-            next_y += h + 12.;
+            next_y += h + gap;
         }
         let inset = if inline_artist { 222. } else { 0. };
         let width = l.main_width - inset;
@@ -486,7 +524,7 @@ fn artist_view(ui: &mut GlassUi, ctx: &egui::Context, m: &Model, root: &mut Node
     } else {
         top + 120.
     };
-    if !short && !narrow {
+    if !short && !narrow && !artist.id.is_empty() {
         let stats = artist
             .listeners
             .map(|n| format!("{} слушателей за месяц", number(n)))
@@ -516,7 +554,7 @@ fn artist_view(ui: &mut GlassUi, ctx: &egui::Context, m: &Model, root: &mut Node
     root.children.push(play);
     let other_x = buttons_x + if narrow { 108. } else { 142. };
     let other_w = (l.main_x + l.main_width - other_x).min(190.);
-    if other_w >= 96. {
+    if other_w >= 96. && !artist.id.is_empty() {
         root.children.push(button(
             if other_w < 160. {
                 "Другие источники"
