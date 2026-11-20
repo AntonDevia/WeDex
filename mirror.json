@@ -7,20 +7,20 @@
     "https://ru.hitmoxx.com/",
     "https://ru.hitmox.org/"
   ],
-  "checked_at_ms": 1795126532865,
+  "checked_at_ms": 1795145614050,
   "discovery": "globalping_redirect_with_ru_validation",
-  "source_measurement": "2HYV9fzIxXaVEeQek00021XEt",
+  "source_measurement": "2doubEQiZEAauBVaA00021XK1",
   "discovered_origin": "https://ru.hitmoxx.com/",
-  "discovered_at_ms": 1795126529948,
+  "discovered_at_ms": 1795145610986,
   "ru_checks": [
     {
       "origin": "https://ru.hitmox.net/",
-      "measurement": "2zsPz754AMGCwxAby00021XEt",
+      "measurement": "2oiqCxNiHagXcpjKd00021XK1",
       "probes": [
         {
           "country": "RU",
-          "network": "Timeweb",
-          "asn": 9123,
+          "network": "SERV.HOST GROUP",
+          "asn": 207957,
           "http_status": 200,
           "ok": true
         },
