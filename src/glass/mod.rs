@@ -93,6 +93,8 @@ pub enum Intent {
     RemoveDownload(Option<Track>),
     CacheAuto(bool),
     OfflineOnly(bool),
+    #[cfg(target_os = "android")]
+    ShareDiagnostics,
     Update(crate::updates::Action),
     Cloud(crate::cloud::Action),
     Artist(model::Artist),
@@ -141,6 +143,8 @@ pub(super) enum Control {
     RemoveDownload(Option<Track>),
     CacheAuto,
     OfflineOnly,
+    #[cfg(target_os = "android")]
+    ShareDiagnostics,
     Update(crate::updates::Action),
     Cloud(crate::cloud::Action),
     CloudConnect,
@@ -1725,6 +1729,8 @@ impl GlassUi {
             Control::RemoveDownload(track) => out.push(Intent::RemoveDownload(track)),
             Control::CacheAuto => out.push(Intent::CacheAuto(!m.settings.cache_auto)),
             Control::OfflineOnly => out.push(Intent::OfflineOnly(!m.settings.offline_only)),
+            #[cfg(target_os = "android")]
+            Control::ShareDiagnostics => out.push(Intent::ShareDiagnostics),
             Control::Update(action) => out.push(Intent::Update(action)),
             Control::Cloud(action) => {
                 if self.overlay == Some(Overlay::Devices)

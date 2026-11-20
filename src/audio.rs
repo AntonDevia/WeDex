@@ -1,5 +1,6 @@
 mod download;
 mod engine;
+pub(crate) mod focus;
 mod preload;
 mod ramp;
 use crate::{
@@ -22,6 +23,7 @@ pub const BANDS: [f32; 10] = crate::equalizer::FREQUENCIES;
 
 #[derive(Clone, Default)]
 pub struct Status {
+    pub focus_lost: bool,
     pub buffering: bool,
     pub ticket: u64,
     pub loading: bool,
@@ -45,7 +47,8 @@ enum Command {
         f32,
     ),
     Failed(u64, String),
-    Pause,
+    #[cfg(any(target_os = "android", test))]
+    Focus(focus::Change),
     SetPlaying(bool),
     Seek(f32),
     Volume(f32),
@@ -66,6 +69,8 @@ pub struct Player {
 impl Player {
     pub fn new(volume: f32, eq: [f32; 10]) -> Self {
         let (tx, rx) = mpsc::channel();
+        #[cfg(target_os = "android")]
+        focus::register(tx.clone());
         let state = Arc::new(Mutex::new(Status::default()));
         let generation = Arc::new(AtomicU64::new(0));
         let equalizer = Arc::new(RwLock::new(eq));
@@ -90,6 +95,8 @@ impl Player {
         }
     }
     pub fn transition(&self, track: Track, services: Services, seconds: f32) -> u64 {
+        #[cfg(target_os = "android")]
+        crate::android::request_audio_focus();
         let ticket = self.generation.fetch_add(1, Ordering::Relaxed) + 1;
         #[cfg(test)]
         if self.silent {
@@ -138,7 +145,7 @@ impl Player {
             .is_some_and(|w| w.key == key && w.complete())
     }
     pub fn pause(&self) {
-        let _ = self.tx.send(Command::Pause);
+        self.set_playing(!self.status().playing);
     }
     pub fn seek(&self, pos: f32) {
         let _ = self.tx.send(Command::Seek(pos));
@@ -147,6 +154,10 @@ impl Player {
         let _ = self.tx.send(Command::Volume(volume));
     }
     pub fn set_playing(&self, playing: bool) {
+        #[cfg(target_os = "android")]
+        if playing {
+            crate::android::request_audio_focus();
+        }
         let _ = self.tx.send(Command::SetPlaying(playing));
     }
     pub fn status(&self) -> Status {

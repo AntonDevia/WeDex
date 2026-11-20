@@ -16,6 +16,12 @@ import org.json.JSONObject;
 public final class WeDexActivity extends GameActivity {
     static { System.loadLibrary("wedex"); }
     public static native void nativeCommand(int command, float value);
+    public static native void nativeAudioFocus(int change);
+    public static native void nativeDiagnostic(String context, String message);
+    public void wedexRequestAudioFocus() {
+        PlaybackService service=PlaybackService.instance;
+        if (service!=null) service.ensureFocus();
+    }
     public static native void nativeForeground(int foreground);
     public static native void nativeTheme(int dark);
     public static native void nativeText(long generation, String text, int start, int end);
@@ -37,8 +43,20 @@ public final class WeDexActivity extends GameActivity {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private boolean foreground;
     private boolean remoteControls;
+    private static boolean diagnosticsInstalled;
+    private String lastPlaybackError = "";
+    private long lastPlaybackErrorAt;
     @Override protected void onCreate(Bundle state) {
         secrets = new SecretStore(this);
+        if (!diagnosticsInstalled) {
+        diagnosticsInstalled=true;
+        Thread.UncaughtExceptionHandler previous=Thread.getDefaultUncaughtExceptionHandler();
+        Thread.setDefaultUncaughtExceptionHandler((thread,error)->{
+            try { nativeDiagnostic("android-crash",error.getClass().getName()+" at "+(error.getStackTrace().length>0?error.getStackTrace()[0]:"unknown")); }
+            catch (Throwable ignored) { /* preserve Android's crash handler */ }
+            if (previous!=null) previous.uncaughtException(thread,error);
+        });
+        }
         super.onCreate(state);
         connectivity=(android.net.ConnectivityManager)getSystemService(CONNECTIVITY_SERVICE);
         networkCallback=new android.net.ConnectivityManager.NetworkCallback() {
@@ -82,6 +100,20 @@ public final class WeDexActivity extends GameActivity {
     public void wedexWriteSecret(String name, String value) throws Exception { secrets.write(name, value); }
     public void wedexOpenUrl(String url) {
         handler.post(() -> { try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url))); } catch (Exception ignored) {} });
+    }
+    public void wedexShareDiagnostics(String path) {
+        handler.post(()->{
+            try {
+                java.io.File file=new java.io.File(path).getCanonicalFile();
+                java.io.File folder=new java.io.File(getFilesDir(),"diagnostics").getCanonicalFile();
+                if (!file.getParentFile().equals(folder)||!file.getName().equals("WeDex-errors.log")) return;
+                Uri uri=androidx.core.content.FileProvider.getUriForFile(this,getPackageName()+".updates",file);
+                Intent send=new Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_STREAM,uri)
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                send.setClipData(ClipData.newRawUri("WeDex diagnostic log",uri));
+                startActivity(Intent.createChooser(send,"Журнал ошибок WeDex"));
+            } catch (Exception error) {nativeDiagnostic("log-export",error.getClass().getName());}
+        });
     }
     private String pendingUpdate;
     public void wedexInstallUpdate(String path) {
@@ -191,7 +223,13 @@ public final class WeDexActivity extends GameActivity {
                 } else if (PlaybackService.instance != null) {
                     PlaybackService.instance.refresh();
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception error) {
+                String kind=error.getClass().getName();
+                long now=android.os.SystemClock.elapsedRealtime();
+                if (!kind.equals(lastPlaybackError)||now-lastPlaybackErrorAt>60000) {
+                    lastPlaybackError=kind;lastPlaybackErrorAt=now;nativeDiagnostic("android-playback",kind);
+                }
+            }
         });
     }
 }

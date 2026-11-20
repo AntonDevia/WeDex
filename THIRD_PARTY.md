@@ -45,3 +45,9 @@ The five transparent service marks were supplied by the user in `music_icons_tra
 Lyrics are fetched on demand from [LRCLIB](https://lrclib.net/docs.txt). No lyrics collection is bundled; preview lines are invented fixtures.
 
 The Windows VPS installer uses [russh](https://github.com/warp-tech/russh) under Apache-2.0 for SSH password/key authentication and host-key verification. Its crypto dependency notices are included in the generated Rust license inventory. The bundled Linux server is built from `crates/wedex-cloud` and transferred through that SSH connection; no external installer script or binary download is executed on the VPS.
+
+## Unicode fallback typography
+
+Noto fallback outlines (SIL Open Font License 1.1) are embedded after Medeo and the existing egui fonts. The set includes full CJK, multilingual scripts, Symbols, Symbols2, Math, Music and monochrome Emoji. `assets/fonts/noto/SOURCES.json` records pinned upstream revisions, source URLs, SHA-256 hashes and the regular-weight instances generated from variable CJK/Emoji fonts using FontTools. Full license and copyright notices are bundled as `OFL-Noto.txt`, `OFL-CJK.txt` and `OFL-Emoji.txt` and included in Android/Windows packages. The collection covers 63,668 Unicode codepoints; it does not promise every Unicode character, colour emoji sequences, bidirectional ordering or complex-script shaping.
+
+The CJK instance uses quadratic TrueType contours (FontTools Cu2QuPen, maximum error 1/1000 em). Unused layout alternates were removed while retaining every Unicode cmap entry, avoiding the 65,535-glyph loca-table limit in the bundled parser. These transformations and resulting hashes are recorded in `SOURCES.json`.

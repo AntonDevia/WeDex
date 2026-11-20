@@ -24,6 +24,9 @@ def licenses(cargo, env):
         if package.get('license_file'): files.append(source/package['license_file'])
         for path in files:
             if path.is_file(): shutil.copy2(path,target/path.name)
+    noto=destination/'Noto';noto.mkdir(exist_ok=True)
+    for path in (ROOT/'assets/fonts/noto').iterdir():
+        if path.suffix in ['.txt','.json']:shutil.copy2(path,noto/path.name)
     for source, name in [('LICENSE','WeDex-MIT.txt'),('THIRD_PARTY.md','THIRD_PARTY.md'),('src/fingerprinting/LICENSE-MIT','ShazamIO-Core-MIT.txt'),('assets/fonts/medeo/OFL.txt','Medeo-OFL.txt'),('assets/fonts/medeo/AUTHORS.txt','Medeo-AUTHORS.txt'),('assets/fontawesome/LICENSE.txt','FontAwesome-Free.txt')]:
         path=ROOT/source
         if path.is_file(): shutil.copy2(path,destination/name)

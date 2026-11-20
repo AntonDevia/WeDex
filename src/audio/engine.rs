@@ -44,6 +44,7 @@ pub(super) fn run(
     let mut active_cancel = None;
     let mut pending = vec![];
     let mut gain = ramp::control(1., 0.);
+    let mut focus = focus::Focus::default();
     let mut outgoing: Option<Outgoing> = None;
     let mut last_position = 0_f32;
     let mut advanced_at = Instant::now();
@@ -151,16 +152,20 @@ pub(super) fn run(
                 gain = ramp::control(1., fade);
                 sink.set_volume(volume);
                 sink.append(ramp::Smooth::new(
-                    Equalizer::with_preamp(
-                        decoder.convert_samples::<f32>(),
-                        eq.clone(),
-                        preamp.clone(),
+                    ramp::Smooth::new(
+                        Equalizer::with_preamp(
+                            decoder.convert_samples::<f32>(),
+                            eq.clone(),
+                            preamp.clone(),
+                        ),
+                        gain.clone(),
+                        if fade > 0. { 0. } else { 1. },
                     ),
-                    gain.clone(),
-                    if fade > 0. { 0. } else { 1. },
+                    focus.gain.clone(),
+                    focus.initial_gain(),
                 ));
                 active = true;
-                if !desired_playing {
+                if !desired_playing || focus.blocked {
                     sink.pause();
                     if let Some(old) = &outgoing {
                         old.sink.pause();
@@ -170,7 +175,8 @@ pub(super) fn run(
                 active_cancel = token;
                 *shared.lock().unwrap() = Status {
                     ticket,
-                    playing: desired_playing,
+                    playing: desired_playing && !focus.blocked,
+                    focus_lost: focus.blocked,
                     duration: seconds,
                     track: Some(track),
                     ..Default::default()
@@ -185,25 +191,23 @@ pub(super) fn run(
                 }
                 state.error = Some(error);
             }
-            Ok(Command::Pause) => {
-                if active {
-                    desired_playing = sink.is_paused();
-                    if sink.is_paused() {
-                        sink.play();
-                        if let Some(old) = &outgoing {
-                            old.sink.play();
-                        }
-                    } else {
-                        sink.pause();
-                        if let Some(old) = &outgoing {
-                            old.sink.pause();
-                        }
+            #[cfg(any(target_os = "android", test))]
+            Ok(Command::Focus(change)) => {
+                focus.change(change, Instant::now());
+                shared.lock().unwrap().focus_lost = focus.blocked;
+                if change == focus::Change::Loss {
+                    desired_playing = false;
+                }
+                if change == focus::Change::Gain && desired_playing {
+                    sink.play();
+                    if let Some(old) = &outgoing {
+                        old.sink.play();
                     }
                 }
             }
             Ok(Command::SetPlaying(playing)) => {
                 desired_playing = playing;
-                if playing {
+                if playing && !focus.blocked {
                     sink.play();
                     if let Some(old) = &outgoing {
                         old.sink.play();
@@ -260,6 +264,12 @@ pub(super) fn run(
             }
             _ => {}
         }
+        if focus.pause_due(Instant::now()) {
+            sink.pause();
+            if let Some(old) = &outgoing {
+                old.sink.pause();
+            }
+        }
         if let Some(old) = &mut outgoing {
             let now = Instant::now();
             if !sink.is_paused() {
@@ -292,6 +302,7 @@ pub(super) fn run(
                 last_position = state.position;
             }
             state.buffering = desired_playing
+                && !focus.blocked
                 && advanced_at.elapsed() > Duration::from_millis(250)
                 && download.as_ref().is_some_and(|b| !b.0.lock().unwrap().done);
             state.playing = !sink.is_paused() && !sink.empty();
@@ -361,6 +372,44 @@ mod tests {
         }
     }
     #[test]
+    #[ignore = "Requires a native audio output; playback is silent"]
+    fn muted_focus_ducks_without_pausing_and_user_pause_prevents_focus_resume() {
+        let (tx, rx) = mpsc::channel();
+        let state = Arc::new(Mutex::new(Status::default()));
+        let copy = state.clone();
+        let results = tx.clone();
+        let worker = std::thread::spawn(move || {
+            run(
+                rx,
+                copy,
+                Arc::new(AtomicU64::new(1)),
+                Arc::new(RwLock::new([0.; 10])),
+                Arc::new(RwLock::new(0.)),
+                results,
+                0.,
+            )
+        });
+        tx.send(ready(1, 0.).0).unwrap();
+        wait(&state, |s| s.playing);
+        tx.send(Command::Focus(focus::Change::Duck)).unwrap();
+        std::thread::sleep(Duration::from_millis(250));
+        assert!(state.lock().unwrap().playing);
+        tx.send(Command::Focus(focus::Change::TransientLoss))
+            .unwrap();
+        wait(&state, |s| s.focus_lost && !s.playing);
+        tx.send(Command::SetPlaying(false)).unwrap();
+        tx.send(Command::Focus(focus::Change::Gain)).unwrap();
+        wait(&state, |s| !s.focus_lost);
+        assert!(
+            !state.lock().unwrap().playing,
+            "User pause must survive focus gain"
+        );
+        tx.send(Command::SetPlaying(true)).unwrap();
+        wait(&state, |s| s.playing);
+        tx.send(Command::Quit).unwrap();
+        worker.join().unwrap();
+    }
+    #[test]
     #[ignore = "Opens the local audio device at zero volume to check overlapping sinks"]
     fn muted_native_crossfade_keeps_outgoing_audio_until_the_fade_finishes() {
         let (tx, rx) = mpsc::channel();
@@ -393,7 +442,7 @@ mod tests {
             1,
             "Previous recording was cancelled before its fade"
         );
-        tx.send(Command::Pause).unwrap();
+        tx.send(Command::SetPlaying(false)).unwrap();
         wait(&state, |s| !s.playing);
         std::thread::sleep(Duration::from_millis(550));
         assert_eq!(
@@ -401,7 +450,7 @@ mod tests {
             1,
             "Paused crossfade must not expire"
         );
-        tx.send(Command::Pause).unwrap();
+        tx.send(Command::SetPlaying(true)).unwrap();
         wait(&state, |s| s.playing);
         std::thread::sleep(Duration::from_millis(600));
         assert_eq!(first_cancel.load(Ordering::Relaxed), 2);

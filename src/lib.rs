@@ -8,6 +8,7 @@ mod diagnostics;
 mod discovery;
 mod equalizer;
 mod fingerprinting;
+mod font_fallback;
 mod glass;
 mod lyrics;
 mod model;

@@ -1,0 +1,133 @@
+# Copyright notices from the bundled Noto font name tables
+
+NotoEmoji-Regular.ttf
+Copyright 2013 Google LLC
+
+NotoMusic-Regular.ttf
+Copyright 2018-2022 Google Inc. All Rights Reserved.
+
+NotoSans-Regular.ttf
+Copyright 2015-2021 Google LLC. All Rights Reserved.
+
+NotoSansArabic-Regular.ttf
+Copyright 2015-2021 Google LLC. All Rights Reserved.
+
+NotoSansArmenian-Regular.ttf
+Copyright 2015-2019 Google LLC. All Rights Reserved.
+
+NotoSansBamum-Regular.ttf
+Copyright 2017 Google Inc. All Rights Reserved.
+
+NotoSansBengali-Regular.ttf
+Copyright 2017-2022 Google Inc. All Rights Reserved.
+
+NotoSansCanadianAboriginal-Regular.ttf
+Copyright 2018-2022 Google LLC. All Rights Reserved.
+
+NotoSansCherokee-Regular.ttf
+Copyright 2016 Google Inc. All Rights Reserved.
+
+NotoSansCJKsc-Regular.ttf
+© 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'.
+
+NotoSansCoptic-Regular.ttf
+Copyright 2017 Google Inc. All Rights Reserved.
+
+NotoSansCuneiform-Regular.ttf
+Copyright 2017 Google Inc. All Rights Reserved.
+
+NotoSansDevanagari-Regular.ttf
+Copyright 2015-2022 Google Inc. All Rights Reserved.
+
+NotoSansEgyptianHieroglyphs-Regular.ttf
+Copyright 2017 Google Inc. All Rights Reserved.
+
+NotoSansEthiopic-Regular.ttf
+Copyright 2022 Google LLC. All Rights Reserved.
+
+NotoSansGeorgian-Regular.ttf
+Copyright 2019 Google LLC. All Rights Reserved.
+
+NotoSansGothic-Regular.ttf
+Copyright 2017 Google Inc. All Rights Reserved.
+
+NotoSansGujarati-Regular.ttf
+Copyright 2019 Google Inc. All Rights Reserved.
+
+NotoSansGurmukhi-Regular.ttf
+Copyright 2019-2022 Google Inc. All Rights Reserved.
+
+NotoSansHebrew-Regular.ttf
+Copyright 2019 Google Inc. All Rights Reserved.
+
+NotoSansJavanese-Regular.ttf
+Copyright 2018-2022 Google Inc. All Rights Reserved.
+
+NotoSansKannada-Regular.ttf
+Copyright 2018-2022 Google Inc. All Rights Reserved.
+
+NotoSansKhmer-Regular.ttf
+Copyright 2016-2022 Google Inc. All Rights Reserved.
+
+NotoSansLao-Regular.ttf
+Copyright 2017 Google Inc. All Rights Reserved.
+
+NotoSansLisu-Regular.ttf
+Copyright 2019 Google Inc. All Rights Reserved. NotoSansLisu.
+
+NotoSansMalayalam-Regular.ttf
+Copyright 2018 Google Inc. All Rights Reserved.
+
+NotoSansMath-Regular.ttf
+Copyright 2018 Google LLC. All Rights Reserved.
+
+NotoSansMongolian-Regular.ttf
+Copyright 2018 Google Inc. All Rights Reserved.
+
+NotoSansMyanmar-Regular.ttf
+Copyright 2015-2002 Google Inc. All Rights Reserved.
+
+NotoSansNKo-Regular.ttf
+Copyright 2017 Google Inc. All Rights Reserved.
+
+NotoSansOldItalic-Regular.ttf
+Copyright 2017 Google Inc. All Rights Reserved.
+
+NotoSansOriya-Regular.ttf
+Copyright 2019 Google LLC. All Rights Reserved.
+
+NotoSansSinhala-Regular.ttf
+Copyright 2016-2022 Google Inc. All Rights Reserved.
+
+NotoSansSymbols-Regular.ttf
+Copyright 2016 Google LLC. All Rights Reserved.
+
+NotoSansSymbols2-Regular.ttf
+Copyright 2017 Google Inc. All Rights Reserved.
+
+NotoSansSyriac-Regular.ttf
+Copyright 2018 Google Inc. All Rights Reserved.
+
+NotoSansTamil-Regular.ttf
+Copyright 2017-2022 Google Inc. All Rights Reserved.
+
+NotoSansTelugu-Regular.ttf
+Copyright 2019-2022 Google LLC. All Rights Reserved.
+
+NotoSansThaana-Regular.ttf
+Copyright 2018 Google Inc. All Rights Reserved.
+
+NotoSansThai-Regular.ttf
+Copyright 2016 Google Inc. All Rights Reserved.
+
+NotoSansTifinagh-Regular.ttf
+Copyright 2019 Google Inc. All Rights Reserved.
+
+NotoSansVai-Regular.ttf
+Copyright 2017 Google Inc. All Rights Reserved.
+
+NotoSansYi-Regular.ttf
+Copyright 2017 Google Inc. All Rights Reserved.
+
+NotoSerifTibetan-Regular.ttf
+Copyright 2022 Google LLC. All Rights Reserved.

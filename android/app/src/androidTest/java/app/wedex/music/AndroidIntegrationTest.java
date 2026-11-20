@@ -8,6 +8,22 @@ import static org.junit.Assert.*;
 
 /** Uses only synthetic credentials in the test device's private application data. */
 public final class AndroidIntegrationTest {
+    @Test public void diagnosticsProviderSharesOnlyAnExplicitSnapshotDirectory() throws Exception {
+        Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
+        String authority=context.getPackageName()+".updates";
+        java.io.File folder=new java.io.File(context.getFilesDir(),"diagnostics");
+        assertTrue(folder.isDirectory()||folder.mkdirs());
+        java.io.File file=new java.io.File(folder,"synthetic-"+java.util.UUID.randomUUID()+".log");
+        try {
+            try (java.io.FileOutputStream stream=new java.io.FileOutputStream(file)){stream.write("Synthetic redacted log".getBytes(java.nio.charset.StandardCharsets.UTF_8));}
+            android.net.Uri uri=androidx.core.content.FileProvider.getUriForFile(context,authority,file);
+            try(java.io.InputStream stream=context.getContentResolver().openInputStream(uri)){assertNotNull(stream);assertEquals('S',stream.read());}
+            for(java.io.File forbidden:new java.io.File[]{new java.io.File(context.getFilesDir(),"WeDex-errors.log"),new java.io.File(context.getDataDir(),"shared_prefs/encrypted_credentials.xml")}){
+                try {androidx.core.content.FileProvider.getUriForFile(context,authority,forbidden);fail("Live logs and credentials must stay private");}
+                catch(IllegalArgumentException expected){/* explicit export only */}
+            }
+        } finally {assertTrue(file.delete());}
+    }
     @Test public void updateProviderSharesOnlyThePrivateUpdateDirectory() throws Exception {
         Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
         String authority = context.getPackageName() + ".updates";

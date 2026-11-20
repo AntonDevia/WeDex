@@ -127,6 +127,46 @@ pub fn request_microphone() -> bool {
 pub fn take_commands() -> Vec<(i32, f32)> {
     COMMANDS.lock().unwrap().drain(..).collect()
 }
+pub fn request_audio_focus() {
+    let _ = with_activity(|env, activity| {
+        env.call_method(activity, "wedexRequestAudioFocus", "()V", &[])?;
+        Ok(())
+    });
+}
+pub fn share_diagnostics(path: &std::path::Path) -> Result<()> {
+    with_activity(|env, activity| {
+        let path = env.new_string(path.to_string_lossy())?;
+        env.call_method(
+            activity,
+            "wedexShareDiagnostics",
+            "(Ljava/lang/String;)V",
+            &[JValue::Object(&path)],
+        )?;
+        Ok(())
+    })
+}
+#[no_mangle]
+pub extern "system" fn Java_app_wedex_music_WeDexActivity_nativeDiagnostic(
+    mut env: JNIEnv,
+    _class: JClass,
+    context: JString,
+    message: JString,
+) {
+    if let (Ok(context), Ok(message)) = (env.get_string(&context), env.get_string(&message)) {
+        let context: String = context.into();
+        let message: String = message.into();
+        let _ =
+            crate::diagnostics::append(&crate::diagnostics::log_path(), &context, &message, &[]);
+    }
+}
+#[no_mangle]
+pub extern "system" fn Java_app_wedex_music_WeDexActivity_nativeAudioFocus(
+    _env: JNIEnv,
+    _class: JClass,
+    change: jint,
+) {
+    crate::audio::focus::notify(change);
+}
 pub fn take_invitation() -> Option<String> {
     INVITATION.lock().unwrap().take()
 }
@@ -324,6 +364,18 @@ fn android_main(android_app: AndroidApp) {
             .with_max_level(log::LevelFilter::Info),
     );
     *ACTIVITY.get_or_init(|| Mutex::new(None)).lock().unwrap() = Some(android_app.clone());
+    let panic_path = crate::diagnostics::log_path();
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        // Panic payloads can contain Debug dumps with credentials. Keep the
+        // source location in the shareable journal, never the arbitrary payload.
+        let location = info
+            .location()
+            .map(|at| format!("{}:{}:{}", at.file(), at.line(), at.column()))
+            .unwrap_or_else(|| "unknown location".into());
+        let _ = crate::diagnostics::append(&panic_path, "rust-panic", &location, &[]);
+        previous(info);
+    }));
     let options = eframe::NativeOptions {
         android_app: Some(android_app),
         renderer: eframe::Renderer::Glow,
@@ -357,6 +409,12 @@ fn android_main(android_app: AndroidApp) {
     );
     if let Err(error) = result {
         log::error!("Android renderer: {error}");
+        let _ = crate::diagnostics::append(
+            &crate::diagnostics::log_path(),
+            "android-renderer",
+            &error.to_string(),
+            &[],
+        );
     }
     *WAKE.get().unwrap().lock().unwrap() = None;
     *ACTIVITY.get().unwrap().lock().unwrap() = None;

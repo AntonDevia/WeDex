@@ -10,11 +10,12 @@ import org.json.JSONObject;
 
 public final class PlaybackService extends Service {
     static volatile JSONObject latest = new JSONObject();
-    static PlaybackService instance;
+    static volatile PlaybackService instance;
     private MediaSession session;
     private AudioManager audio;
     private AudioFocusRequest focus;
-    private boolean hasFocus, resumeOnFocus, startedForeground;
+    private volatile boolean hasFocus, suspended;
+    private boolean startedForeground;
     private PowerManager.WakeLock wake;
     private VolumeProvider volumeProvider;
     private boolean remoteRoute;
@@ -22,23 +23,14 @@ public final class PlaybackService extends Service {
         @Override public void onReceive(Context c, Intent i) { if (!latest.optBoolean("remote")) WeDexActivity.nativeCommand(2, 0); }
     };
     @Override public void onCreate() {
-        super.onCreate(); instance = this;
+        super.onCreate();
         getSystemService(NotificationManager.class).createNotificationChannel(
             new NotificationChannel("playback", "Воспроизведение", NotificationManager.IMPORTANCE_LOW));
         audio = (AudioManager)getSystemService(AUDIO_SERVICE);
         focus = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
             .setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
-            .setOnAudioFocusChangeListener(change -> {
-                if (latest.optBoolean("remote")) { hasFocus = false; resumeOnFocus = false; return; }
-                if (change == AudioManager.AUDIOFOCUS_GAIN) {
-                    hasFocus = true;
-                    if (resumeOnFocus) { resumeOnFocus = false; WeDexActivity.nativeCommand(1, 0); }
-                } else {
-                    hasFocus = false;
-                    resumeOnFocus = change != AudioManager.AUDIOFOCUS_LOSS && latest.optBoolean("playing");
-                    WeDexActivity.nativeCommand(2, 0);
-                }
-            }).build();
+            .setWillPauseWhenDucked(false)
+            .setOnAudioFocusChangeListener(this::onAudioFocusChange).build();
         session = new MediaSession(this, "WeDex");
         session.setCallback(new MediaSession.Callback() {
             @Override public void onPlay() { startForegroundService(new Intent(PlaybackService.this, PlaybackService.class).setAction("play")); }
@@ -53,6 +45,26 @@ public final class PlaybackService extends Service {
         wake.setReferenceCounted(false);
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(noisy, new IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY), RECEIVER_NOT_EXPORTED);
         else registerReceiver(noisy, new IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY));
+        instance = this;
+    }
+    private synchronized void onAudioFocusChange(int change) {
+        if (latest.optBoolean("remote")) return;
+        if (change == AudioManager.AUDIOFOCUS_GAIN || change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK) {
+            hasFocus = true;
+            if (change == AudioManager.AUDIOFOCUS_GAIN) suspended = false;
+        } else {
+            hasFocus = false; suspended = true;
+        }
+        WeDexActivity.nativeAudioFocus(change);
+    }
+    synchronized boolean ensureFocus() {
+        if (latest.optBoolean("remote")) return true;
+        if (hasFocus) return true;
+        try {hasFocus = audio.requestAudioFocus(focus) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED;}
+        catch (RuntimeException error) {hasFocus=false;WeDexActivity.nativeDiagnostic("audio-focus",error.getClass().getName());}
+        suspended = !hasFocus;
+        WeDexActivity.nativeAudioFocus(hasFocus ? AudioManager.AUDIOFOCUS_GAIN : AudioManager.AUDIOFOCUS_LOSS_TRANSIENT);
+        return hasFocus;
     }
     private PendingIntent action(String value, int code) {
         Intent intent = new Intent(this, PlaybackService.class).setAction(value);
@@ -85,14 +97,16 @@ public final class PlaybackService extends Service {
         }
         remoteRoute = remote;
         if (remote && volumeProvider != null) volumeProvider.setCurrentVolume((int)(latest.optDouble("volume", .65) * 100));
-        if (remote && hasFocus) { audio.abandonAudioFocusRequest(focus); hasFocus = false; resumeOnFocus = false; }
-        if (!playing && !loading && hasFocus && !resumeOnFocus) {
-            audio.abandonAudioFocusRequest(focus);
-            hasFocus = false;
-        }
-        if (!remote && playing && !hasFocus && !resumeOnFocus) {
-            hasFocus = audio.requestAudioFocus(focus) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
-            if (!hasFocus) WeDexActivity.nativeCommand(2, 0);
+        if (remote) {
+            if (hasFocus || suspended) audio.abandonAudioFocusRequest(focus);
+            hasFocus = false; suspended = false;
+            // A phone notification never changes the volume of the remotely controlled PC.
+            WeDexActivity.nativeAudioFocus(AudioManager.AUDIOFOCUS_GAIN);
+        } else {
+            if (!playing && !loading && hasFocus && !suspended) {
+                audio.abandonAudioFocusRequest(focus); hasFocus = false;
+            }
+            if (playing && !hasFocus && !suspended) ensureFocus();
         }
         if (!remote && (playing || loading)) { if (!wake.isHeld()) wake.acquire(30 * 60 * 1000L); }
         else if (wake.isHeld()) wake.release();

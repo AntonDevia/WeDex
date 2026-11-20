@@ -42,3 +42,7 @@ foreach ($entry in @(
 }
 Get-FileHash -LiteralPath (Join-Path $outputDir 'WeDex-Sonora.exe') -Algorithm SHA256 | Format-List
 Write-Output $outputDir
+
+$notoLicenseDir = Join-Path $licenseDir 'Noto'
+New-Item -ItemType Directory -Force -Path $notoLicenseDir | Out-Null
+Get-ChildItem -LiteralPath 'assets/fonts/noto' -File | Where-Object { $_.Extension -in '.txt','.json' } | ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $notoLicenseDir }

@@ -169,7 +169,15 @@ fn section(p: &mut Node, value: &str, y: f32) {
 }
 pub(super) fn settings(ui: &mut GlassUi, m: &Model) -> Node {
     let (mut root, mut p) = panel(ui, "Настройки", 720., 760.);
-    let mut viewport = body(ui, &p, 996.);
+    let mut viewport = body(
+        ui,
+        &p,
+        if cfg!(target_os = "android") {
+            1056.
+        } else {
+            996.
+        },
+    );
     let b = &mut viewport.children[0];
     let w = b.width;
     section(b, "Аккаунт и сервисы", 0.);
@@ -334,7 +342,11 @@ pub(super) fn settings(ui: &mut GlassUi, m: &Model) -> Node {
     b.children.push(text(
         &format!("WeDex · версия {}", env!("CARGO_PKG_VERSION")),
         4.,
-        958.,
+        if cfg!(target_os = "android") {
+            1018.
+        } else {
+            958.
+        },
         w,
         12.,
         false,
@@ -384,6 +396,16 @@ pub(super) fn settings(ui: &mut GlassUi, m: &Model) -> Node {
         44.,
         Control::OfflineOnly,
         m.settings.offline_only,
+    ));
+    #[cfg(target_os = "android")]
+    b.children.push(button(
+        "Поделиться журналом ошибок",
+        0.,
+        926.,
+        w,
+        44.,
+        Control::ShareDiagnostics,
+        false,
     ));
     p.children.push(viewport);
     root.children.push(p);

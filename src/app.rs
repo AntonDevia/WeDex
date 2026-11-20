@@ -989,6 +989,7 @@ impl App {
                             self.persist();
                             self.queue.extend(tracks);
                             let stalled = self.player.status().ended
+                                && !self.player.status().focus_lost
                                 && self.cursor.is_some_and(|i| i + 1 >= index);
                             if (autoplay || stalled) && index < self.queue.len() {
                                 self.start(index);
@@ -1118,13 +1119,18 @@ impl App {
                 self.report_error("playback", error);
                 self.last_error = signature;
                 if self.controlled_playback().is_none()
+                    && !status.focus_lost
                     && self.cursor.is_some_and(|i| i + 1 < self.queue.len())
                 {
                     self.next();
                 }
             }
         }
-        if !status.loading && !self.resolving && self.controlled_playback().is_none() {
+        if !status.loading
+            && !status.focus_lost
+            && !self.resolving
+            && self.controlled_playback().is_none()
+        {
             if status.ended && status.ticket != self.handled_end {
                 self.handled_end = status.ticket;
                 if self.settings.repeat_current {
@@ -1229,6 +1235,20 @@ impl App {
                 3 => Provider::Hitmotop,
                 _ => Provider::Yandex,
             };
+        }
+        if page == "unicode" {
+            self.interface.page = Page::Search;
+            for (track, (title, artist)) in tracks.iter_mut().zip([
+                ("你好，世界 · 音乐", "周杰倫"),
+                ("東京の夜 · 音楽", "宇多田ヒカル"),
+                ("서울의 밤 · 음악", "아이유"),
+                ("𝄞 ♯ ♫ ∑ ∞ 𝕏 ☆ ⚡", "Symbols · Русский"),
+                ("ᗪ 𓂀 ꧁ ♡ ꧂ 😀", "Unicode"),
+                ("हिन्दी · தமிழ் · ไทย", "Noto fallback"),
+            ]) {
+                track.title = title.into();
+                track.artist = artist.into();
+            }
         }
         self.queue = tracks.clone();
         self.cursor = Some(0);
@@ -1808,6 +1828,19 @@ impl App {
                     self.downloads.cancel();
                 }
                 self.persist();
+            }
+            #[cfg(target_os = "android")]
+            Intent::ShareDiagnostics => {
+                let result = crate::diagnostics::export(&[
+                    &self.yandex_token,
+                    &self.lastfm_key,
+                    &self.soundcloud_token,
+                ])
+                .map_err(anyhow::Error::from)
+                .and_then(|path| crate::android::share_diagnostics(&path));
+                if let Err(error) = result {
+                    self.report_error("log-export", error.to_string());
+                }
             }
             Intent::Cloud(action) => self.cloud.action(action),
             Intent::Update(action) => {
