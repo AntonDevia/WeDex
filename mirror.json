@@ -7,15 +7,15 @@
     "https://ru.hitmoxx.com/",
     "https://ru.hitmox.org/"
   ],
-  "checked_at_ms": 1795209321388,
+  "checked_at_ms": 1795228352005,
   "discovery": "globalping_redirect_with_ru_validation",
-  "source_measurement": "21Bz6x5ABl6A68kh700021Xb9",
+  "source_measurement": "2GDlI1qq7ApNTc7dB00021XgG",
   "discovered_origin": "https://ru.hitmoxx.com/",
-  "discovered_at_ms": 1795209318473,
+  "discovered_at_ms": 1795228348959,
   "ru_checks": [
     {
       "origin": "https://ru.hitmox.net/",
-      "measurement": "2U28kIBZMqjMteM6L00021Xb9",
+      "measurement": "270ZeGWcFxuCkXiKH00021XgG",
       "probes": [
         {
           "country": "RU",
