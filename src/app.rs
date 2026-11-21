@@ -10,7 +10,6 @@ use eframe::egui::{self, Color32, FontId, Vec2};
 use std::{
     collections::{HashMap, HashSet},
     sync::{
-        atomic::{AtomicBool, Ordering},
         mpsc::{self, Receiver, Sender},
         Arc,
     },
@@ -127,7 +126,7 @@ pub struct App {
     radio_id: u64,
     play_id: u64,
     recognition_id: u64,
-    recording: Option<(Instant, Arc<AtomicBool>)>,
+    recording: Option<Arc<recognition::Capture>>,
     handled_end: u64,
     recorded_ticket: u64,
     last_error: String,
@@ -1206,8 +1205,8 @@ impl App {
         });
     }
     fn record(&mut self) {
-        if let Some((_, cancel)) = self.recording.take() {
-            cancel.store(true, Ordering::Relaxed);
+        if let Some(capture) = self.recording.take() {
+            capture.cancel();
             self.recognition_id += 1;
             self.message = "Распознавание отменено".into();
             return;
@@ -1215,14 +1214,14 @@ impl App {
         if self.player.status().playing {
             self.player.pause();
         }
-        let cancelled = Arc::new(AtomicBool::new(false));
-        self.recording = Some((Instant::now(), cancelled.clone()));
+        let capture = Arc::new(recognition::Capture::default());
+        self.recording = Some(capture.clone());
         self.recognition_id += 1;
         let id = self.recognition_id;
         self.job(move |s| {
             Event::Recognition(
                 id,
-                recognition::recognize(&s, cancelled).map_err(|e| e.to_string()),
+                recognition::recognize(&s, capture).map_err(|e| e.to_string()),
             )
         });
     }
@@ -1443,7 +1442,7 @@ impl App {
             loading_library: self.loading_library,
             loading_playlist: self.loading_playlist,
             resolving: self.resolving,
-            recording: self.recording.is_some(),
+            recording: self.recording.as_ref().map(|capture| capture.visual()),
             account: self.account.clone(),
             connected: if self.preview_status.is_some() {
                 [true, true, false, true, true]
@@ -2348,8 +2347,8 @@ impl eframe::App for App {
         }
         self.persist();
         self.cloud.flush(self.store.as_ref());
-        if let Some((_, cancel)) = &self.recording {
-            cancel.store(true, Ordering::Relaxed);
+        if let Some(capture) = &self.recording {
+            capture.cancel();
         }
     }
 }
@@ -2357,6 +2356,7 @@ impl eframe::App for App {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
     #[test]
     fn favorite_download_button_toggles_the_local_collection_without_changing_playback() {
         let mut app = App::with_context(&egui::Context::default(), Some("favorites".into()));

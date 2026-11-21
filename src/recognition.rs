@@ -7,14 +7,70 @@ use anyhow::{bail, Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::{
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU32, Ordering},
         Arc, Mutex,
     },
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
+const CAPTURE_SECONDS: u64 = 12;
+
+#[derive(Clone, Copy, Default)]
+pub(crate) struct Visual {
+    pub progress: f32,
+    pub level: f32,
+    pub searching: bool,
+}
+
+#[derive(Default)]
+pub(crate) struct Capture {
+    cancelled: AtomicBool,
+    progress: AtomicU32,
+    level: AtomicU32,
+    searching: AtomicBool,
+}
+
+impl Capture {
+    pub fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Relaxed);
+    }
+
+    pub fn visual(&self) -> Visual {
+        Visual {
+            progress: f32::from_bits(self.progress.load(Ordering::Relaxed)),
+            level: f32::from_bits(self.level.load(Ordering::Relaxed)),
+            searching: self.searching.load(Ordering::Relaxed),
+        }
+    }
+
+    fn append<T: Copy>(
+        &self,
+        samples: &Mutex<Vec<f32>>,
+        input: &[T],
+        limit: usize,
+        to_float: impl Fn(T) -> f32,
+    ) {
+        let mut samples = samples.lock().unwrap();
+        let start = samples.len();
+        let count = (limit - start).min(input.len());
+        if count == 0 {
+            return;
+        }
+        samples.extend(input[..count].iter().copied().map(to_float));
+        let energy = samples[start..].iter().map(|s| s * s).sum::<f32>() / count as f32;
+        let db = 10. * energy.max(1.0e-10).log10();
+        let target = ((db + 55.) / 43.).clamp(0., 1.);
+        let previous = f32::from_bits(self.level.load(Ordering::Relaxed));
+        let smoothing = if target > previous { 0.58 } else { 0.18 };
+        let level = previous + (target - previous) * smoothing;
+        self.level.store(level.to_bits(), Ordering::Relaxed);
+        let progress = samples.len() as f32 / limit as f32;
+        self.progress.store(progress.to_bits(), Ordering::Relaxed);
+    }
+}
+
 /// Records only after an explicit button click. Audio stays in RAM; only a fingerprint is uploaded.
-pub fn recognize(services: &Services, cancelled: Arc<AtomicBool>) -> Result<Track> {
+pub(crate) fn recognize(services: &Services, capture: Arc<Capture>) -> Result<Track> {
     let device = cpal::default_host()
         .default_input_device()
         .context("Микрофон не найден. Проверьте разрешение на запись звука")?;
@@ -23,19 +79,18 @@ pub fn recognize(services: &Services, cancelled: Arc<AtomicBool>) -> Result<Trac
     let data = samples.clone();
     let rate = config.sample_rate().0;
     let channels = config.channels() as usize;
-    let max_samples = rate as usize * channels * 12;
+    let max_samples = rate as usize * channels * CAPTURE_SECONDS as usize;
     let capture_error = Arc::new(Mutex::new(None::<String>));
     let error = capture_error.clone();
     let err = move |e: cpal::StreamError| {
         *error.lock().unwrap() = Some(e.to_string());
     };
+    let meter = capture.clone();
     let stream = match config.sample_format() {
         cpal::SampleFormat::F32 => device.build_input_stream(
             &config.into(),
             move |input: &[f32], _| {
-                let mut d = data.lock().unwrap();
-                let n = (max_samples - d.len()).min(input.len());
-                d.extend_from_slice(&input[..n]);
+                meter.append(&data, input, max_samples, |s| s);
             },
             err,
             None,
@@ -43,9 +98,7 @@ pub fn recognize(services: &Services, cancelled: Arc<AtomicBool>) -> Result<Trac
         cpal::SampleFormat::I16 => device.build_input_stream(
             &config.into(),
             move |input: &[i16], _| {
-                let mut d = data.lock().unwrap();
-                let n = (max_samples - d.len()).min(input.len());
-                d.extend(input[..n].iter().map(|s| *s as f32 / 32768.0));
+                meter.append(&data, input, max_samples, |s| s as f32 / 32768.0);
             },
             err,
             None,
@@ -53,9 +106,9 @@ pub fn recognize(services: &Services, cancelled: Arc<AtomicBool>) -> Result<Trac
         cpal::SampleFormat::U16 => device.build_input_stream(
             &config.into(),
             move |input: &[u16], _| {
-                let mut d = data.lock().unwrap();
-                let n = (max_samples - d.len()).min(input.len());
-                d.extend(input[..n].iter().map(|s| (*s as f32 - 32768.0) / 32768.0));
+                meter.append(&data, input, max_samples, |s| {
+                    (s as f32 - 32768.0) / 32768.0
+                });
             },
             err,
             None,
@@ -64,8 +117,8 @@ pub fn recognize(services: &Services, cancelled: Arc<AtomicBool>) -> Result<Trac
     };
     stream.play()?;
     let start = Instant::now();
-    while start.elapsed() < Duration::from_secs(12) {
-        if cancelled.load(Ordering::Relaxed) {
+    while start.elapsed() < Duration::from_secs(CAPTURE_SECONDS) {
+        if capture.cancelled.load(Ordering::Relaxed) {
             drop(stream);
             bail!("Распознавание отменено");
         }
@@ -85,6 +138,7 @@ pub fn recognize(services: &Services, cancelled: Arc<AtomicBool>) -> Result<Trac
     if input.len() < rate as usize * channels * 3 {
         bail!("Недостаточно звука с микрофона");
     }
+    capture.searching.store(true, Ordering::Relaxed);
     let mono: Vec<f32> = input
         .chunks_exact(channels)
         .map(|frame| frame.iter().sum::<f32>() / channels as f32)
@@ -96,7 +150,7 @@ pub fn recognize(services: &Services, cancelled: Arc<AtomicBool>) -> Result<Trac
     let uri = signature
         .encode_to_uri()
         .map_err(|e| anyhow::anyhow!(e.to_string()))?;
-    if cancelled.load(Ordering::Relaxed) {
+    if capture.cancelled.load(Ordering::Relaxed) {
         bail!("Распознавание отменено");
     }
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64;
@@ -161,6 +215,20 @@ fn resample(input: &[f32], rate: u32) -> Vec<i16> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn capture_reports_progress_and_smooths_the_audio_level() {
+        let capture = Capture::default();
+        let samples = Mutex::new(Vec::new());
+        capture.append(&samples, &[0.25; 25], 100, |level| level);
+        let loud = capture.visual();
+        assert_eq!(loud.progress, 0.25);
+        assert!(loud.level > 0.5 && loud.level < 1.);
+        capture.append(&samples, &[0.; 100], 100, |level| level);
+        let quiet = capture.visual();
+        assert_eq!(quiet.progress, 1.);
+        assert!(quiet.level > 0. && quiet.level < loud.level);
+        assert_eq!(samples.into_inner().unwrap().len(), 100);
+    }
     #[test]
     fn resampling_preserves_length_and_suppresses_aliases() {
         let sine = |hz: f64| {

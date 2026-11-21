@@ -3,7 +3,7 @@ use anyhow::{Context, Result};
 use eframe::egui;
 use jni::{
     objects::{JClass, JObject, JString, JValue},
-    sys::{jfloat, jint},
+    sys::{jbyteArray, jfloat, jint},
     JNIEnv, JavaVM,
 };
 use std::{
@@ -24,7 +24,7 @@ static FOREGROUND: AtomicBool = AtomicBool::new(true);
 static DARK: AtomicBool = AtomicBool::new(false);
 static WAKE: OnceLock<Mutex<Option<egui::Context>>> = OnceLock::new();
 mod text;
-pub use text::{text_after, text_before};
+pub use text::{show_search_keyboard, text_after, text_before};
 
 fn with_activity<T>(work: impl FnOnce(&mut JNIEnv<'_>, &JObject<'_>) -> Result<T>) -> Result<T> {
     let app = ACTIVITY
@@ -209,6 +209,37 @@ pub fn fullscreen(enabled: bool) {
         Ok(())
     });
 }
+#[no_mangle]
+pub extern "system" fn Java_app_wedex_music_WeDexActivity_nativeCover(
+    mut env: JNIEnv,
+    _class: JClass,
+    source: JString,
+) -> jbyteArray {
+    let Ok(source) = env.get_string(&source) else {
+        return std::ptr::null_mut();
+    };
+    let source: String = source.into();
+    if source.len() > 8192 {
+        return std::ptr::null_mut();
+    }
+    static HTTP: OnceLock<Option<reqwest::blocking::Client>> = OnceLock::new();
+    let bytes = crate::cache::global().cover(&source).or_else(|| {
+        if crate::cache::offline() || crate::network::state() == crate::network::State::Offline {
+            return None;
+        }
+        let http = HTTP.get_or_init(|| {
+            reqwest::blocking::Client::builder()
+                .user_agent("WeDex")
+                .build()
+                .ok()
+        });
+        crate::cache::fetch_cover(&source, http.as_ref()?).ok()
+    });
+    bytes
+        .and_then(|data| env.byte_array_from_slice(&data).ok())
+        .map_or(std::ptr::null_mut(), |array| array.into_raw())
+}
+
 pub fn publish(status: &audio::Status, remote: bool, volume: f32) {
     struct Published {
         at: Instant,
@@ -248,11 +279,12 @@ pub fn publish(status: &audio::Status, remote: bool, volume: f32) {
         at: Instant::now(),
         playing: status.playing,
         loading: status.loading || status.buffering,
-        track,
+        track: track.clone(),
         remote,
         volume,
     };
     let json = serde_json::json!({"remote":remote,"volume":volume,"playing":status.playing,"loading":status.loading||status.buffering,"position":status.position,
+        "track":track.unwrap_or_default(), "cover":status.track.as_ref().and_then(|t|t.cover.as_deref()).unwrap_or(""),
         "duration":status.duration,"title":status.track.as_ref().map(|t|t.title.as_str()).unwrap_or(""),
         "artist":status.track.as_ref().map(|t|t.artist.as_str()).unwrap_or("")}).to_string();
     let _ = with_activity(|env, activity| {
@@ -325,6 +357,7 @@ impl eframe::App for AndroidUi {
     }
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         self.app.lock().unwrap().update(ctx, frame);
+        text::end_frame(ctx);
         let copied = ctx.output(|output| {
             output
                 .commands

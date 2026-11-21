@@ -736,7 +736,7 @@ fn fixture() -> Model {
         loading_library: false,
         loading_playlist: false,
         resolving: false,
-        recording: false,
+        recording: None,
         account: String::new(),
         connected: [true, true, false, true, true],
         lyrics: None,
@@ -1588,6 +1588,61 @@ fn long_lists_scroll_without_clicking_clipped_rows() {
         .all(|hit| !matches!(hit.control, Control::Play(_))
             || hit.clip.max.y <= h.ui.layout.player_y - 24.));
 }
+#[test]
+fn recognition_rings_are_centered_and_follow_capture_progress_and_volume() {
+    let _phone = crate::platform::mobile_for_test();
+    let mut m = fixture();
+    let mut h = Harness::new();
+    h.size = vec2(411., 838.);
+    h.ui.reduced_motion = false;
+    h.ui.overlay = Some(Overlay::Recognition);
+    h.frame(&m, vec![]);
+    let panel =
+        h.ui.last_overlay
+            .as_ref()
+            .unwrap()
+            .find("Glass dialog")
+            .unwrap();
+    let idle = panel.find("Ellipse").unwrap().clone();
+    m.recording = Some(crate::recognition::Visual {
+        progress: 0.8,
+        level: 0.9,
+        searching: false,
+    });
+    h.frame(&m, vec![]);
+    let panel =
+        h.ui.last_overlay
+            .as_ref()
+            .unwrap()
+            .find("Glass dialog")
+            .unwrap();
+    let rings: Vec<_> = panel
+        .children
+        .iter()
+        .filter(|n| n.kind == "ELLIPSE")
+        .collect();
+    assert_eq!(rings.len(), 3);
+    let mic = panel.find("icon/mic").unwrap();
+    for node in rings.iter().copied().chain([mic]) {
+        assert!((node.x + node.width / 2. - panel.width / 2.).abs() < 0.01);
+        assert!((node.y + node.height / 2. - mic.y - mic.height / 2.).abs() < 0.01);
+    }
+    assert!(rings[0].width > idle.width);
+    assert!(rings[0].fills[0]["color"]["g"].as_f64() > idle.fills[0]["color"]["g"].as_f64());
+    assert_eq!(mic.tint["r"], 1.);
+    m.recording.as_mut().unwrap().searching = true;
+    h.frame(&m, vec![]);
+    assert_eq!(
+        h.ui.last_overlay
+            .as_ref()
+            .unwrap()
+            .find("Recognition status")
+            .unwrap()
+            .characters,
+        "Ищем трек…"
+    );
+}
+
 #[test]
 fn search_keyboard_and_recognition_return_backend_intents() {
     let m = fixture();

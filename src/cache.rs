@@ -248,7 +248,6 @@ impl Disk {
         std::fs::read(path).ok()
     }
     pub fn save_cover(&self, track: &Track, http: &reqwest::blocking::Client) {
-        use std::io::Read;
         let Some(source) = track
             .cover
             .as_deref()
@@ -259,35 +258,40 @@ impl Disk {
         if self.cover(source).is_some() {
             return;
         }
-        let result = (|| -> Result<Vec<u8>> {
-            let response = http
-                .get(source)
-                .timeout(std::time::Duration::from_secs(5))
-                .send()?
-                .error_for_status()?;
-            let mut bytes = Vec::new();
-            response.take(4 * 1024 * 1024 + 1).read_to_end(&mut bytes)?;
-            ensure!(bytes.len() <= 4 * 1024 * 1024, "Обложка слишком большая");
-            let reader =
-                image::ImageReader::new(std::io::Cursor::new(&bytes)).with_guessed_format()?;
-            let (w, h) = reader.into_dimensions()?;
-            ensure!(w <= 4096 && h <= 4096, "Обложка слишком большая");
-            let image = image::load_from_memory(&bytes)?
-                .thumbnail(600, 600)
-                .to_rgb8();
-            let mut out = Vec::new();
-            image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 85)
-                .encode_image(&image)?;
-            ensure!(out.len() <= 512 * 1024, "Обложка слишком большая");
-            Ok(out)
-        })();
-        if let Ok(bytes) = result {
+        if let Ok(bytes) = fetch_cover(source, http) {
             let _guard = WRITER.lock().unwrap_or_else(|e| e.into_inner());
             if self.root.join(format!("{}.json", key(track))).exists() {
                 let _ = replace(&self.cover_path(source), &bytes);
             }
         }
     }
+}
+
+pub(crate) fn fetch_cover(source: &str, http: &reqwest::blocking::Client) -> Result<Vec<u8>> {
+    use std::io::Read;
+
+    ensure!(
+        source.starts_with("https://") || source.starts_with("http://"),
+        "Некорректный адрес обложки"
+    );
+    let response = http
+        .get(source)
+        .timeout(std::time::Duration::from_secs(5))
+        .send()?
+        .error_for_status()?;
+    let mut bytes = Vec::new();
+    response.take(4 * 1024 * 1024 + 1).read_to_end(&mut bytes)?;
+    ensure!(bytes.len() <= 4 * 1024 * 1024, "Обложка слишком большая");
+    let reader = image::ImageReader::new(std::io::Cursor::new(&bytes)).with_guessed_format()?;
+    let (w, h) = reader.into_dimensions()?;
+    ensure!(w <= 4096 && h <= 4096, "Обложка слишком большая");
+    let image = image::load_from_memory(&bytes)?
+        .thumbnail(600, 600)
+        .to_rgb8();
+    let mut out = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 85).encode_image(&image)?;
+    ensure!(out.len() <= 512 * 1024, "Обложка слишком большая");
+    Ok(out)
 }
 
 #[cfg(test)]

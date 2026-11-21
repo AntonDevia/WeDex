@@ -14,6 +14,7 @@ struct Buffer {
 #[derive(Default)]
 struct Bridge {
     field: Option<egui::Id>,
+    search: bool,
     generation: i64,
     sent: String,
     selection: (usize, usize),
@@ -145,6 +146,7 @@ pub fn text_after(ctx: &egui::Context, id: egui::Id, value: &str, secret: bool, 
         b.field = Some(id);
         b.pending = None;
     }
+    b.search = search;
     b.sent = value.into();
     b.selection = selection;
     let generation = b.generation;
@@ -163,6 +165,42 @@ pub fn text_after(ctx: &egui::Context, id: egui::Id, value: &str, secret: bool, 
                 JValue::Bool(secret.into()),
                 JValue::Bool(search.into()),
             ],
+        )?;
+        Ok(())
+    });
+}
+
+pub fn show_search_keyboard() {
+    let _ = with_activity(|env, activity| {
+        env.call_method(activity, "wedexShowSearchKeyboard", "()V", &[])?;
+        Ok(())
+    });
+}
+
+pub(super) fn end_frame(ctx: &egui::Context) {
+    let mut b = bridge().lock().unwrap();
+    if !b.search {
+        return;
+    }
+    if ctx.output(|output| output.ime.is_some())
+        && b.field.is_some_and(|id| ctx.memory(|m| m.has_focus(id)))
+    {
+        // The native EditText owns this IME connection. Letting winit activate
+        // GameActivity's IME as well switches the keyboard back to the surface.
+        ctx.output_mut(|output| output.ime = None);
+        return;
+    }
+    b.field = None;
+    b.search = false;
+    b.pending = None;
+    let generation = b.generation;
+    drop(b);
+    let _ = with_activity(|env, activity| {
+        env.call_method(
+            activity,
+            "wedexEndSearch",
+            "(J)V",
+            &[JValue::Long(generation)],
         )?;
         Ok(())
     });

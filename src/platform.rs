@@ -91,6 +91,10 @@ pub fn text_after(
     #[cfg(not(target_os = "android"))]
     let _ = (ctx, id, text, secret, search);
 }
+pub fn show_search_keyboard() {
+    #[cfg(target_os = "android")]
+    crate::android::show_search_keyboard();
+}
 pub fn system_dark(ctx: &eframe::egui::Context) -> bool {
     #[cfg(target_os = "android")]
     {

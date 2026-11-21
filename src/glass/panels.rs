@@ -18,6 +18,71 @@ pub(super) fn fill(rgb: [f32; 3], opacity: f32) -> serde_json::Value {
     json!({"type":"SOLID","color":{"r":rgb[0],"g":rgb[1],"b":rgb[2]},"opacity":opacity})
 }
 
+pub(super) fn recognition_animation(
+    root: &mut Node,
+    visual: crate::recognition::Visual,
+    dark: bool,
+    reduced: bool,
+) {
+    let Some(panel) = root.find_mut("Glass dialog") else {
+        return;
+    };
+    let width = panel.width;
+    let height = panel.height;
+    let top = 100_f32.min(height * 0.32);
+    let label_y = (height * 0.65).min(height - 82.).max(top);
+    let diameter = 164_f32.min(width * 0.58).min((label_y - top - 24.).max(0.));
+    let center = pos2(width / 2., (top + label_y - 14.) * 0.5);
+    let progress = if visual.searching {
+        1.
+    } else {
+        visual.progress
+    };
+    let pulse = if reduced || visual.searching {
+        0.
+    } else {
+        visual.level
+    };
+    let neutral = if dark {
+        [[0.145, 0.135, 0.17], [0.19, 0.18, 0.22], [0.23, 0.22, 0.27]]
+    } else {
+        [[0.83, 0.82, 0.85], [0.61, 0.60, 0.65], [0.29, 0.28, 0.33]]
+    };
+    let accent = [232. / 255., 1., 163. / 255.];
+    for (i, circle) in panel
+        .children
+        .iter_mut()
+        .filter(|n| n.kind == "ELLIPSE")
+        .take(3)
+        .enumerate()
+    {
+        let scale = [1., 0.78, 0.54][i];
+        let size = diameter * scale * (1. + pulse * [0.13, 0.10, 0.05][i]);
+        let mix = progress * [0.57, 0.67, 0.31][i];
+        let color = std::array::from_fn(|c| neutral[i][c] + (accent[c] - neutral[i][c]) * mix);
+        circle.fills = vec![fill(color, 1.)];
+        circle.width = size;
+        circle.height = size;
+        circle.move_to(center.x - size / 2., center.y - size / 2.);
+    }
+    if let Some(mic) = panel.find_mut("icon/mic") {
+        let size = diameter * (0.268 + pulse * 0.012);
+        mic.width = size;
+        mic.height = size;
+        mic.move_to(center.x - size / 2., center.y - size / 2.);
+        mic.tint = json!({"r":1.,"g":1.,"b":1.});
+    }
+    if let Some(status) = panel.find_mut("Recognition status") {
+        status.move_to(28., label_y);
+        status.width = width - 56.;
+        status.text_align_horizontal = "CENTER".into();
+        status.natural_width = 0.;
+        if visual.searching {
+            status.characters = "Ищем трек…".into();
+        }
+    }
+}
+
 pub(super) fn playback_progress(panel: &mut Node, position: f32, duration: f32) {
     if duration <= 0. || position <= 0. {
         return;

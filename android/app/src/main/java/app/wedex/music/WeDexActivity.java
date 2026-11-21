@@ -7,16 +7,25 @@ import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.text.Editable;
+import android.text.TextWatcher;
+import android.view.View;
+import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.InputMethodManager;
+import android.widget.EditText;
+import android.widget.FrameLayout;
 import org.json.JSONObject;
 
 public final class WeDexActivity extends GameActivity {
     static { System.loadLibrary("wedex"); }
     public static native void nativeCommand(int command, float value);
     public static native void nativeAudioFocus(int change);
+    static native byte[] nativeCover(String source);
     public static native void nativeDiagnostic(String context, String message);
     public void wedexRequestAudioFocus() {
         PlaybackService service=PlaybackService.instance;
@@ -39,6 +48,7 @@ public final class WeDexActivity extends GameActivity {
     }
     private long editGeneration;
     private boolean settingText;
+    private EditText searchEditor;
     private SecretStore secrets;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private boolean foreground;
@@ -183,7 +193,67 @@ public final class WeDexActivity extends GameActivity {
         return value == null ? "" : value.toString();
     }
     @Override public void stateChanged(com.google.androidgamesdk.gametextinput.State state, boolean dismissed) {
-        if (!settingText) nativeText(editGeneration, state.text, state.selectionStart, state.selectionEnd);
+        if (!settingText && (searchEditor == null || !searchEditor.hasFocus())) {
+            nativeText(editGeneration, state.text, state.selectionStart, state.selectionEnd);
+        }
+    }
+
+    private void publishSearchEdit() {
+        if (searchEditor != null && searchEditor.hasFocus() && !settingText) {
+            nativeText(editGeneration, searchEditor.getText().toString(), searchEditor.getSelectionStart(), searchEditor.getSelectionEnd());
+        }
+    }
+
+    private EditText createSearchEditor() {
+        // Egui still draws the field. Android's standard text editor owns the
+        // IME connection, including repeat deletion and cursor composition.
+        EditText editor = new EditText(this) {
+            @Override protected void onSelectionChanged(int start, int end) {
+                super.onSelectionChanged(start, end);
+                publishSearchEdit();
+            }
+        };
+        editor.setSingleLine(true);
+        editor.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        editor.setImeOptions(EditorInfo.IME_ACTION_SEARCH | EditorInfo.IME_FLAG_NO_EXTRACT_UI);
+        editor.setTextColor(Color.TRANSPARENT);
+        editor.setBackground(null);
+        editor.setCursorVisible(false);
+        editor.setFocusableInTouchMode(true);
+        editor.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        editor.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);
+        editor.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence text, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence text, int start, int before, int count) {}
+            @Override public void afterTextChanged(Editable text) { publishSearchEdit(); }
+        });
+        editor.setOnEditorActionListener((view, action, event) -> {
+            if (action != EditorInfo.IME_ACTION_SEARCH && action != EditorInfo.IME_NULL) return false;
+            if (event != null && event.getAction() != android.view.KeyEvent.ACTION_UP) return true;
+            nativeSubmit();
+            keyboard().hideSoftInputFromWindow(editor.getWindowToken(), 0);
+            return true;
+        });
+        addContentView(editor, new FrameLayout.LayoutParams(1, 1));
+        return editor;
+    }
+
+    private InputMethodManager keyboard() { return getSystemService(InputMethodManager.class); }
+
+    public void wedexShowSearchKeyboard() {
+        handler.post(() -> {
+            if (searchEditor != null && searchEditor.hasFocus()) {
+                keyboard().showSoftInput(searchEditor, InputMethodManager.SHOW_IMPLICIT);
+            }
+        });
+    }
+
+    public void wedexEndSearch(long generation) {
+        handler.post(() -> {
+            if (generation != editGeneration || searchEditor == null || !searchEditor.hasFocus()) return;
+            keyboard().hideSoftInputFromWindow(searchEditor.getWindowToken(), 0);
+            mSurfaceView.requestFocus();
+        });
     }
     @Override public void onEditorAction(int action) {
         nativeSubmit();
@@ -194,6 +264,18 @@ public final class WeDexActivity extends GameActivity {
             boolean changedField = editGeneration != generation;
             editGeneration = generation;
             settingText = true;
+            if (search) {
+                if (searchEditor == null) searchEditor = createSearchEditor();
+                if (!text.contentEquals(searchEditor.getText())) searchEditor.setText(text);
+                searchEditor.setSelection(Math.min(start, text.length()), Math.min(end, text.length()));
+                if (changedField || !searchEditor.hasFocus()) {
+                    searchEditor.requestFocus();
+                    wedexShowSearchKeyboard();
+                }
+                settingText = false;
+                return;
+            }
+            if (searchEditor != null && searchEditor.hasFocus()) mSurfaceView.requestFocus();
             android.view.inputmethod.EditorInfo info = new android.view.inputmethod.EditorInfo();
             info.inputType = android.text.InputType.TYPE_CLASS_TEXT | (secret ? android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD : android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
             info.imeOptions = (search ? android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH : android.view.inputmethod.EditorInfo.IME_ACTION_DONE) | android.view.inputmethod.EditorInfo.IME_FLAG_NO_EXTRACT_UI | (secret ? android.view.inputmethod.EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING : 0);

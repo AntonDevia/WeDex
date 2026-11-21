@@ -228,7 +228,7 @@ pub struct Model {
     pub loading_library: bool,
     pub loading_playlist: bool,
     pub resolving: bool,
-    pub recording: bool,
+    pub(crate) recording: Option<crate::recognition::Visual>,
     pub account: String,
     pub connected: [bool; 5],
     pub lyrics: Option<crate::lyrics::Lyrics>,
@@ -1554,6 +1554,11 @@ impl GlassUi {
             Overlay::Credentials => unreachable!(),
             Overlay::Recognition => {
                 Self::command(&mut root, "button/Отменить", Control::Close);
+                if let Some(panel) = root.find_mut("Glass dialog") {
+                    if let Some(status) = panel.children.iter_mut().rfind(|n| n.kind == "TEXT") {
+                        status.name = "Recognition status".into();
+                    }
+                }
             }
             Overlay::Recognized => {
                 if let Some(track) = &self.recognized {
@@ -2123,6 +2128,9 @@ impl GlassUi {
                 .desired_width(rect.width());
             let response = ui.put(rect, edit);
             crate::platform::text_after(&ctx, id, &self.query, false, true);
+            if response.clicked() {
+                crate::platform::show_search_keyboard();
+            }
             if (response.has_focus() || response.lost_focus())
                 && ui.input(|i| i.key_pressed(egui::Key::Enter))
                 && !self.query.trim().is_empty()
@@ -2331,7 +2339,10 @@ impl GlassUi {
                 }
             }
         }
-        if self.recognized.is_some() && self.overlay == Some(Overlay::Recognition) && !m.recording {
+        if self.recognized.is_some()
+            && self.overlay == Some(Overlay::Recognition)
+            && m.recording.is_none()
+        {
             self.overlay = Some(Overlay::Recognized);
         }
         if self.overlay == Some(Overlay::Versions) && m.alternatives.is_none() {
@@ -2603,6 +2614,14 @@ impl GlassUi {
                     .overlay(root, *self.offsets.get("dialog-scroll").unwrap_or(&0.));
             }
             theme::apply(root, self.dark);
+            if self.overlay == Some(Overlay::Recognition) {
+                panels::recognition_animation(
+                    root,
+                    m.recording.unwrap_or_default(),
+                    self.dark,
+                    self.reduced_motion,
+                );
+            }
             self.buttons.apply(
                 root,
                 ctx.input(|i| i.pointer.hover_pos()),
