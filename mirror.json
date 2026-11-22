@@ -7,27 +7,20 @@
     "https://ru.hitmoxx.com/",
     "https://ru.hitmox.org/"
   ],
-  "checked_at_ms": 1795307145147,
+  "checked_at_ms": 1795334806889,
   "discovery": "globalping_redirect_with_ru_validation",
-  "source_measurement": "2KZbZxKgzHrIVJKIK00021Y1R",
+  "source_measurement": "2Y8kxdjrpzkXErhl800021Y8s",
   "discovered_origin": "https://ru.hitmoxx.com/",
-  "discovered_at_ms": 1795307142090,
+  "discovered_at_ms": 1795334803747,
   "ru_checks": [
     {
       "origin": "https://ru.hitmox.net/",
-      "measurement": "283xm0lV07PTVJt8H00021Y1R",
+      "measurement": "2EGDCLQNknq2gAtjD00021Y8s",
       "probes": [
         {
           "country": "RU",
-          "network": "Datacheap",
-          "asn": 16262,
-          "http_status": 200,
-          "ok": true
-        },
-        {
-          "country": "RU",
-          "network": "MTS",
-          "asn": 8359,
+          "network": "Timeweb",
+          "asn": 9123,
           "http_status": 200,
           "ok": true
         },
@@ -35,6 +28,13 @@
           "country": "RU",
           "network": "Limited Company Information and Consulting Agency",
           "asn": 31357,
+          "http_status": 200,
+          "ok": true
+        },
+        {
+          "country": "RU",
+          "network": "MTS",
+          "asn": 8359,
           "http_status": 200,
           "ok": true
         }
