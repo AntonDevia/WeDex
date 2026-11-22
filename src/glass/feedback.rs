@@ -185,7 +185,10 @@ pub(super) fn paint(ui: &mut GlassUi, ctx: &egui::Context, m: &Model, p: &Painte
             ring(p, pos2(rect.right() - 82., rect.top() + 36.), 10., now, ink);
         }
     }
-    if ui.cloud_view.library_enabled && ui.page == Page::Library && !ui.zen && ui.overlay.is_none()
+    if ui.cloud_view.library_enabled
+        && ui.page == Page::Favorites
+        && !ui.zen
+        && ui.overlay.is_none()
     {
         let center = pos2(ui.layout.main_x + 164., 68.);
         ui.renderer.regions.insert(

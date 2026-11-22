@@ -769,14 +769,19 @@ impl Renderer {
                 y: origin.y,
                 ..t
             };
-            p.add(Shape::closed_line(
+            let outline = if n.outline.is_empty() {
                 points(
                     tr,
                     n.width - inset * 2.,
                     n.height - inset * 2.,
                     (n.corner_radius - inset).max(0.),
                     n.kind == "ELLIPSE",
-                ),
+                )
+            } else {
+                n.outline.iter().map(|p| t.point(p.x, p.y)).collect()
+            };
+            p.add(Shape::closed_line(
+                outline,
                 Stroke::new(n.stroke_weight * t.scale(), color),
             ));
         }

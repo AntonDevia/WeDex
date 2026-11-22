@@ -20,7 +20,8 @@ pub(super) fn fill(rgb: [f32; 3], opacity: f32) -> serde_json::Value {
 
 pub(super) fn recognition_animation(
     root: &mut Node,
-    visual: crate::recognition::Visual,
+    visual: Option<crate::recognition::Visual>,
+    now: f64,
     dark: bool,
     reduced: bool,
 ) {
@@ -31,24 +32,26 @@ pub(super) fn recognition_animation(
     let height = panel.height;
     let top = 100_f32.min(height * 0.32);
     let label_y = (height * 0.65).min(height - 82.).max(top);
-    let diameter = 164_f32.min(width * 0.58).min((label_y - top - 24.).max(0.));
+    let diameter = 164_f32
+        .min(width * 0.55)
+        .min((label_y - top - 14.).max(0.) / 1.38);
     let center = pos2(width / 2., (top + label_y - 14.) * 0.5);
+    let moving = !reduced && visual.is_some_and(|v| !v.searching);
+    let visual = visual.unwrap_or_default();
     let progress = if visual.searching {
         1.
     } else {
         visual.progress
     };
-    let pulse = if reduced || visual.searching {
-        0.
-    } else {
-        visual.level
-    };
+    let pulse = if moving { visual.level } else { 0. };
     let neutral = if dark {
         [[0.145, 0.135, 0.17], [0.19, 0.18, 0.22], [0.23, 0.22, 0.27]]
     } else {
         [[0.83, 0.82, 0.85], [0.61, 0.60, 0.65], [0.29, 0.28, 0.33]]
     };
     let accent = [232. / 255., 1., 163. / 255.];
+    let phase = (now % 60.) as f32 * std::f32::consts::TAU / 1.2;
+    let mut outer_radius = diameter / 2.;
     for (i, circle) in panel
         .children
         .iter_mut()
@@ -57,20 +60,51 @@ pub(super) fn recognition_animation(
         .enumerate()
     {
         let scale = [1., 0.78, 0.54][i];
-        let size = diameter * scale * (1. + pulse * [0.13, 0.10, 0.05][i]);
-        let mix = progress * [0.57, 0.67, 0.31][i];
+        let swing = 0.88 + 0.12 * (phase + i as f32 * 0.7).sin();
+        let size = diameter * scale * (1. + pulse * swing * [0.27, 0.24, 0.21][i]);
+        let sequence = (progress * 3. - (2 - i) as f32).clamp(0., 1.);
+        let mix = sequence * sequence * (3. - 2. * sequence) * [0.54, 0.45, 0.31][i];
         let color = std::array::from_fn(|c| neutral[i][c] + (accent[c] - neutral[i][c]) * mix);
         circle.fills = vec![fill(color, 1.)];
         circle.width = size;
         circle.height = size;
         circle.move_to(center.x - size / 2., center.y - size / 2.);
+        if i == 0 {
+            outer_radius = size / 2.;
+        }
     }
     if let Some(mic) = panel.find_mut("icon/mic") {
-        let size = diameter * (0.268 + pulse * 0.012);
+        let size = diameter * 0.268;
         mic.width = size;
         mic.height = size;
         mic.move_to(center.x - size / 2., center.y - size / 2.);
-        mic.tint = json!({"r":1.,"g":1.,"b":1.});
+        mic.tint = json!({"r":accent[0],"g":accent[1],"b":accent[2]});
+    }
+    if moving && outer_radius > 0. {
+        let extent = outer_radius + diameter * 0.07 + 3.;
+        let mut wave = frame(
+            "Recognition wave",
+            center.x - extent,
+            center.y - extent,
+            extent * 2.,
+            extent * 2.,
+        );
+        let amplitude = diameter * (0.008 + 0.055 * pulse);
+        wave.outline = (0..96)
+            .map(|i| {
+                let angle = std::f32::consts::TAU * i as f32 / 96.;
+                let ripple =
+                    0.74 * (7. * angle - phase).sin() + 0.26 * (11. * angle - 2. * phase).sin();
+                let radius = outer_radius + 1. + amplitude * ripple;
+                pos2(extent + radius * angle.cos(), extent + radius * angle.sin())
+            })
+            .collect();
+        wave.stroke_weight = 1.25 + 1.1 * pulse;
+        wave.strokes = vec![fill(
+            if dark { accent } else { [0.40, 0.51, 0.21] },
+            0.42 + 0.53 * pulse,
+        )];
+        panel.children.push(wave);
     }
     if let Some(status) = panel.find_mut("Recognition status") {
         status.move_to(28., label_y);

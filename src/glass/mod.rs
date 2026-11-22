@@ -64,7 +64,6 @@ pub enum Page {
     Sonora,
     Search,
     Artist,
-    Library,
     Favorites,
     Playlists,
     Playlist,
@@ -412,8 +411,7 @@ impl GlassUi {
         self.page = match name {
             "search" | "results" => Page::Search,
             "artist" => Page::Artist,
-            "library" => Page::Library,
-            "favorites" | "downloads" => Page::Favorites,
+            "library" | "favorites" | "downloads" => Page::Favorites,
             "playlists" => Page::Playlists,
             "playlist" => Page::Playlist,
             _ => Page::Sonora,
@@ -630,7 +628,7 @@ impl GlassUi {
         for (label, page) in [
             ("Sonora", Page::Sonora),
             ("Поиск", Page::Search),
-            ("Медиатека", Page::Library),
+            ("Медиатека", Page::Favorites),
         ] {
             Self::command(root, &format!("nav/{label}"), Control::Navigate(page));
         }
@@ -1051,7 +1049,6 @@ impl GlassUi {
                 }
             }
             Page::Artist => "10:604",
-            Page::Library => "10:877",
             Page::Favorites => "10:1123",
             Page::Playlists => "12:1722",
             Page::Playlist => "10:1413",
@@ -1176,27 +1173,32 @@ impl GlassUi {
                 }
             }
             Page::Search | Page::Artist => search::compose(self, ctx, m, &mut root, results),
-            Page::Library | Page::Favorites | Page::Playlists => {
+            Page::Favorites | Page::Playlists => {
                 root.children.retain(|n| {
                     !(n.kind == "TEXT"
                         && n.characters.contains("SoundCloud")
                         && n.characters.contains("YouTube Music"))
+                        && n.name != "Ваши коллекции синхронизируются из Яндекс Музыки."
                 });
                 if let Some(tabs) = root.find_mut("Library filters") {
-                    for (n, page) in tabs.children.iter_mut().zip([
-                        Page::Library,
-                        Page::Favorites,
-                        Page::Playlists,
-                    ]) {
+                    tabs.children.retain(|tab| tab.name != "tab/Обзор");
+                    for (n, page) in tabs
+                        .children
+                        .iter_mut()
+                        .zip([Page::Favorites, Page::Playlists])
+                    {
                         n.command = Some(Control::Navigate(page));
                     }
                 }
-                Self::command(&mut root, "button/Слушать", Control::Listen(false));
-                Self::command(&mut root, "button/Слушать всё", Control::Listen(false));
-                Self::command(&mut root, "button/Перемешать", Control::Listen(true));
                 Self::command(&mut root, "button/refresh-cw", Control::Sync);
                 if self.page == Page::Favorites {
-                    root.children.retain(|n| !n.name.starts_with("track/"));
+                    root.children.retain(|n| {
+                        !n.name.starts_with("track/")
+                            && !matches!(
+                                n.name.as_str(),
+                                "button/Слушать всё" | "button/Перемешать"
+                            )
+                    });
                     if let Some(n) = root.find_mut("6 треков · ваша общая коллекция")
                     {
                         n.characters =
@@ -1209,39 +1211,17 @@ impl GlassUi {
                         m,
                         &m.favorites,
                         ListViewport {
-                            rect: Rect::from_min_size(pos2(264., 334.), vec2(786., 422.)),
+                            rect: Rect::from_min_size(pos2(264., 264.), vec2(786., 492.)),
                             key: "favorites",
                         },
                         false,
                     );
                 } else {
-                    if let Some(hero) = root.find_mut("Favorite collection") {
-                        hero.texts(&[
-                            "Любимое — всегда рядом.",
-                            &format!("{} треков из разных музыкальных миров", m.favorites.len()),
-                            "Слушать",
-                        ]);
-                        if !m.preview {
-                            if let Some(t) = m.favorites.first() {
-                                hero.set_image(&Self::source(t));
-                            }
-                        }
-                        hero.command = Some(Control::Navigate(Page::Favorites));
-                    }
                     for container_name in ["Playlist grid", "All playlists"] {
                         if let Some(grid) = root.find_mut(container_name) {
                             let templates = grid.children.clone();
                             grid.children.clear();
-                            for (i, p) in m
-                                .playlists
-                                .iter()
-                                .take(if self.page == Page::Library {
-                                    4
-                                } else {
-                                    usize::MAX
-                                })
-                                .enumerate()
-                            {
+                            for (i, p) in m.playlists.iter().enumerate() {
                                 let y = (i / 4) as f32 * 266.;
                                 if let Some(template) = templates.get(i % templates.len().max(1)) {
                                     let mut card = template.clone();
@@ -1347,13 +1327,16 @@ impl GlassUi {
         if overlay == Overlay::Eq {
             return Some(panels::equalizer(self, m));
         }
+        if overlay == Overlay::Queue {
+            return Some(self.queue_overlay(ctx, m));
+        }
         let id = match overlay {
             Overlay::TrackActions => unreachable!(),
             Overlay::Updates => unreachable!(),
             Overlay::Cloud | Overlay::Devices => unreachable!(),
             Overlay::Artists => unreachable!(),
             Overlay::Settings => "13:2407",
-            Overlay::Queue => "13:2146",
+            Overlay::Queue => unreachable!(),
             Overlay::Eq => {
                 if m.settings.eq == [4., 3., 2., 1., 0., -1., -1., 0., 1., 2.] {
                     "13:2290"
@@ -1390,71 +1373,7 @@ impl GlassUi {
             Overlay::Cloud | Overlay::Devices => unreachable!(),
             Overlay::Artists => unreachable!(),
             Overlay::Settings => unreachable!(),
-            Overlay::Queue => {
-                if let Some(panel) = root.find_mut("Glass dialog") {
-                    let templates: Vec<Node> = panel
-                        .children
-                        .iter()
-                        .filter(|n| n.name.starts_with("track/"))
-                        .cloned()
-                        .collect();
-                    panel.children.retain(|n| !n.name.starts_with("track/"));
-                    if m.preview {
-                        for (template, index) in templates.iter().zip([3, 0, 1, 2, 5, 4]) {
-                            if let Some(track) = m.queue.get(index) {
-                                let mut row = template.clone();
-                                self.track(&mut row, track, m);
-                                row.command = Some(Control::QueueIndex(index));
-                                panel.children.push(row);
-                            }
-                        }
-                    } else {
-                        let current = m.cursor.unwrap_or(0).min(m.queue.len());
-                        let past = (0..current).rev().collect::<Vec<_>>();
-                        self.queue_list(
-                            ctx,
-                            panel,
-                            m,
-                            &templates[0],
-                            &past,
-                            ListViewport {
-                                rect: Rect::from_min_size(pos2(28., 146.), vec2(316., 56.)),
-                                key: "queue-past",
-                            },
-                        );
-                        if let Some(index) = m.cursor {
-                            if let Some(track) = m.queue.get(index) {
-                                let mut row = templates[1].clone();
-                                self.track(&mut row, track, m);
-                                row.command = Some(Control::QueueIndex(index));
-                                panel.children.push(row);
-                            }
-                        }
-                        let next = m.cursor.map(|i| i + 1).unwrap_or(0);
-                        let future = (next..m.queue.len()).collect::<Vec<_>>();
-                        self.queue_list(
-                            ctx,
-                            panel,
-                            m,
-                            &templates[2],
-                            &future,
-                            ListViewport {
-                                rect: Rect::from_min_size(pos2(28., 374.), vec2(316., 264.)),
-                                key: "queue-next",
-                            },
-                        );
-                    }
-                    if m.queue.is_empty() {
-                        panel.children.push(Node::text_node(
-                            "Запустите поток или выберите трек",
-                            28.,
-                            270.,
-                            316.,
-                            true,
-                        ));
-                    }
-                }
-            }
+            Overlay::Queue => unreachable!(),
             Overlay::Eq => unreachable!(),
             Overlay::Tune => {
                 Self::command(
@@ -1691,45 +1610,116 @@ impl GlassUi {
         }
         Some(root)
     }
-    fn queue_list(
-        &mut self,
-        ctx: &egui::Context,
-        panel: &mut Node,
-        m: &Model,
-        template: &Node,
-        indices: &[usize],
-        viewport: ListViewport,
-    ) {
-        let ListViewport { rect, key } = viewport;
-        let global = rect.translate(vec2(panel.x, panel.y));
-        let offset = self.scroll_offset(ctx, global, key, indices.len() as f32 * 66., true);
-        let mut group = Node {
-            id: key.into(),
-            name: key.into(),
-            kind: "FRAME".into(),
-            visible: true,
-            opacity: 1.,
-            width: rect.width(),
-            height: rect.height(),
-            clips_content: true,
-            ..Default::default()
-        };
-        group.move_to(rect.min.x, rect.min.y);
-        for (i, index) in indices.iter().enumerate() {
-            let y = i as f32 * 66. - offset;
-            if y + 56. < 0. || y > rect.height() {
+    fn queue_overlay(&mut self, ctx: &egui::Context, m: &Model) -> Node {
+        const ROW: f32 = 66.;
+        const HEADING: f32 = 32.;
+        let size = self.layout.size;
+        let padding = if self.layout.mobile { 20. } else { 32. };
+        let width = (size.x - padding * 2.).clamp(0., 760.);
+        let left = (size.x - width) / 2.;
+        let mut screen = panels::frame("Runtime panel", 0., 0., size.x, size.y);
+        screen.fills = vec![panels::fill([0.976, 0.973, 0.965], 1.)];
+        screen
+            .children
+            .push(panels::text("Очередь", left, 20., width - 52., 26., true));
+        screen.children.push(panels::icon_button(
+            "x",
+            left + width - 44.,
+            15.,
+            44.,
+            Control::Close,
+            false,
+        ));
+        if m.queue.is_empty() {
+            screen.children.push(panels::text(
+                "Запустите поток или выберите трек",
+                left,
+                86.,
+                width,
+                15.,
+                false,
+            ));
+            return screen;
+        }
+
+        let current = m.cursor.filter(|&index| index < m.queue.len());
+        let past = 0..current.unwrap_or(0);
+        let sections = [
+            ("Уже прозвучало", past.clone()),
+            ("Сейчас", current.map_or(0..0, |i| i..i + 1)),
+            ("Далее", current.map_or(0, |i| i + 1)..m.queue.len()),
+        ];
+        let total = m.queue.len() as f32 * ROW
+            + sections
+                .iter()
+                .filter(|(_, range)| !range.is_empty())
+                .count() as f32
+                * HEADING;
+        let height = (size.y - 72. - padding).max(0.);
+        let rect = Rect::from_min_size(pos2(left, 72.), vec2(width, height));
+        self.offsets.entry("queue".into()).or_insert_with(|| {
+            if past.is_empty() {
+                0.
+            } else {
+                HEADING + past.len() as f32 * ROW
+            }
+        });
+        let offset = self.scroll_offset(ctx, rect, "queue", total, true);
+        let mut list = panels::frame("queue", rect.min.x, rect.min.y, width, height);
+        list.clips_content = true;
+        let templates = self.roots["13:2146"]
+            .find("Glass dialog")
+            .unwrap()
+            .children
+            .iter()
+            .filter(|n| n.name.starts_with("track/"));
+        let mut y = -offset;
+        for ((label, range), template) in sections.into_iter().zip(templates) {
+            if range.is_empty() {
                 continue;
             }
-            if let Some(track) = m.queue.get(*index) {
-                let mut row = template.clone();
-                row.id = format!("{key}/{index}");
-                row.move_to(0., y);
-                self.track(&mut row, track, m);
-                row.command = Some(Control::QueueIndex(*index));
-                group.children.push(row);
+            if y + HEADING > 0. && y < height {
+                let mut heading = panels::text(label, 0., y + 4., width, 13., true);
+                heading.opacity = 0.72;
+                list.children.push(heading);
             }
+            y += HEADING;
+            let first = ((-y / ROW).floor().max(0.)) as usize;
+            let end = (((height - y) / ROW).ceil().max(0.)) as usize;
+            for (slot, index) in range
+                .clone()
+                .enumerate()
+                .skip(first)
+                .take(end.saturating_sub(first))
+            {
+                let mut row = template.clone();
+                row.id = format!("queue/{index}");
+                row.name.clone_from(&row.id);
+                row.opacity = row.opacity.max(0.65);
+                row.children.retain(|n| n.visible);
+                row.width = (width - 8.).max(0.);
+                row.move_to(0., y + slot as f32 * ROW);
+                self.track(&mut row, &m.queue[index], m);
+                row.command = Some(Control::QueueIndex(index));
+                list.children.push(row);
+            }
+            y += range.len() as f32 * ROW;
         }
-        panel.children.push(group);
+        if total > height && height > 0. {
+            let thumb = (height * height / total).clamp(18_f32.min(height), height);
+            let mut indicator = panels::frame(
+                "Queue scroll indicator",
+                width - 3.,
+                (height - thumb) * offset / (total - height),
+                3.,
+                thumb,
+            );
+            indicator.corner_radius = 1.5;
+            indicator.fills = vec![panels::fill([0.5, 0.48, 0.53], 0.35)];
+            list.children.push(indicator);
+        }
+        screen.children.push(list);
+        screen
     }
     fn process(
         &mut self,
@@ -2230,19 +2220,25 @@ impl GlassUi {
                     let mut scroll = None;
                     let area = if slider {
                         touch::Area::Slider
-                    } else if contains("Lyrics content") {
-                        touch::Area::Lyrics
                     } else if self.overlay.is_some() {
-                        if contains("Dialog content") {
+                        if self.overlay == Some(Overlay::Queue) && contains("queue") {
+                            scroll = Some("queue".into());
+                        } else if contains("Dialog content") {
                             scroll = Some("dialog-scroll".into());
+                        }
+                        if scroll.is_some() {
                             touch::Area::Scroll
                         } else {
                             touch::Area::None
                         }
-                    } else if !self.zen && contains("Floating player") {
-                        touch::Area::Mini
+                    } else if contains("Lyrics content") {
+                        touch::Area::Lyrics
                     } else if self.zen && contains("Zen artwork") {
                         touch::Area::Artwork
+                    } else if self.zen {
+                        touch::Area::Zen
+                    } else if contains("Floating player") {
+                        touch::Area::Mini
                     } else if contains("Cover flow · swipe") {
                         touch::Area::Cards
                     } else {
@@ -2407,7 +2403,7 @@ impl GlassUi {
             self.mini_timeline(&mut root, m);
             max
         };
-        if !self.zen && matches!(self.page, Page::Library | Page::Favorites) {
+        if !self.zen && self.page == Page::Favorites {
             let mut downloads = panels::icon_button(
                 if m.downloads.busy { "x" } else { "download" },
                 self.layout.size.x - self.layout.margin - 180.,
@@ -2540,8 +2536,8 @@ impl GlassUi {
         let mut zen_underlay = None;
         if self.layout.mobile && showing_zen {
             let held = ctx.input(|i| i.pointer.primary_down())
-                && self.touch.area == touch::Area::Artwork
-                && self.touch.axis == touch::Axis::Vertical;
+                && self.overlay.is_none()
+                && self.touch.pulls_zen_down();
             let drag = if held {
                 let d = self.touch.delta.y.max(0.);
                 self.zen_drag = transitions::Tween::new(d);
@@ -2596,6 +2592,7 @@ impl GlassUi {
         }
         if self.rendered_overlay != self.overlay {
             self.offsets.remove("dialog-scroll");
+            self.offsets.remove("queue");
             if self.overlay.is_some() {
                 self.overlay_started = now;
                 self.closing_overlay = None;
@@ -2617,7 +2614,8 @@ impl GlassUi {
             if self.overlay == Some(Overlay::Recognition) {
                 panels::recognition_animation(
                     root,
-                    m.recording.unwrap_or_default(),
+                    m.recording,
+                    now,
                     self.dark,
                     self.reduced_motion,
                 );

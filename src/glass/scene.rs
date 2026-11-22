@@ -37,6 +37,8 @@ pub struct Node {
     pub tint: Value,
     pub children: Vec<Node>,
     #[serde(skip)]
+    pub outline: Vec<Pos2>,
+    #[serde(skip)]
     pub command: Option<super::Control>,
 }
 fn yes() -> bool {
@@ -54,6 +56,9 @@ impl Node {
         self.stroke_weight *= factor;
         self.font_size *= factor;
         self.natural_width *= factor;
+        for p in &mut self.outline {
+            *p = pos2(p.x * factor, p.y * factor);
+        }
         self.move_to(self.x * factor, self.y * factor);
         for value in [&mut self.line_height, &mut self.letter_spacing] {
             if value["unit"] == "PIXELS" {

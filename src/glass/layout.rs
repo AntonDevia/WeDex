@@ -81,7 +81,7 @@ impl Layout {
         }
         let y = if self.size.y < 700. {
             match key {
-                "favorites" => 272.,
+                "favorites" => 238.,
                 "playlist" => 356.,
                 "results" => 356.,
                 _ => old.min.y,
@@ -280,33 +280,11 @@ impl Layout {
                     self.grid(&mut n);
                     n.clips_content = false;
                 }
-                "Favorite collection" => {
-                    n.width = self.main_width;
-                    if let Some(art) = n.find_mut("Collection cover") {
-                        art.visible = self.main_width > 560.;
-                        art.move_to(self.main_width - 196., -12.);
-                    }
-                    for t in &mut n.children {
-                        if t.kind == "TEXT" {
-                            t.width = (self.main_width - 48.).max(80.);
-                            if t.font_size >= 24. && self.main_width < 480. {
-                                t.font_size = 19.;
-                                t.natural_width = 0.;
-                            }
-                        }
-                    }
-                }
                 "Library filters" => {
                     let gap = 4.;
-                    let widths = [
-                        self.main_width * 0.25,
-                        self.main_width * 0.45,
-                        self.main_width * 0.30 - 8.,
-                    ];
-                    let mut x = 0.;
+                    let width = ((self.main_width - 48. - gap) / 2.).min(168.);
                     for (i, tab) in n.children.iter_mut().enumerate() {
-                        let width = widths[i.min(2)];
-                        tab.move_to(x, 0.);
+                        tab.move_to(i as f32 * (width + gap), 0.);
                         tab.width = width;
                         tab.visit(&mut |t| {
                             if t.kind == "TEXT" {
@@ -319,7 +297,6 @@ impl Layout {
                                 }
                             }
                         });
-                        x += width + gap;
                     }
                 }
                 _ => {}
@@ -365,6 +342,12 @@ impl Layout {
                 if n.name == "Версии в каталогах" {
                     n.move_to(n.x, 320.);
                 }
+            }
+            if page == Page::Favorites && n.name == "button/refresh-cw" {
+                n.move_to(
+                    self.main_x + self.main_width - n.width,
+                    if self.size.y < 700. { 184. } else { 208. },
+                );
             }
             bottom = bottom.max(n.y + n.height);
             content.push(n);
@@ -439,7 +422,7 @@ impl Layout {
                 (
                     "Медиатека",
                     "library",
-                    super::Control::Navigate(Page::Library),
+                    super::Control::Navigate(Page::Favorites),
                     !matches!(page, Page::Sonora | Page::Search | Page::Artist),
                 ),
                 (

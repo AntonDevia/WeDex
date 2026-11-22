@@ -173,7 +173,7 @@ fn lyrics_are_only_in_zen_and_player_toggle_opens_it() {
 #[test]
 fn phone_player_swipes_open_skip_and_close_without_triggering_seek() {
     let _mobile = crate::platform::mobile_for_test();
-    let m = fixture();
+    let mut m = fixture();
     let mut h = Harness::new();
     h.size = vec2(411., 838.);
     h.frame(&m, vec![]);
@@ -218,6 +218,17 @@ fn phone_player_swipes_open_skip_and_close_without_triggering_seek() {
     let actions = swipe(&mut h, &m, art.center(), art.center() + vec2(0., 110.));
     assert!(actions.iter().any(|a| matches!(a, Intent::Zen(false))));
     assert!(!h.ui.zen);
+
+    h.ui.zen = true;
+    m.settings.lyrics_enabled = true;
+    h.frame(&m, vec![]);
+    let lyrics = h.ui.renderer.regions["Lyrics content"].0.center();
+    let actions = swipe(&mut h, &m, lyrics, lyrics + vec2(0., 130.));
+    assert!(!actions.iter().any(|a| matches!(a, Intent::Zen(false))));
+    assert!(h.ui.zen);
+    let title = h.ui.renderer.regions["Zen mobile/source"].0.center();
+    let actions = swipe(&mut h, &m, title, title + vec2(0., 130.));
+    assert!(actions.iter().any(|a| matches!(a, Intent::Zen(false))));
 }
 
 #[test]
@@ -372,39 +383,73 @@ fn track_actions_download_without_starting_a_version_search() {
 #[test]
 fn library_download_button_is_one_action_and_never_opens_a_storage_dialog() {
     for size in [vec2(1440., 960.), vec2(411., 869.)] {
-        for page in [Page::Library, Page::Favorites] {
-            let mut m = fixture();
-            let mut h = Harness::new();
-            h.size = size;
-            h.ui.page = page;
-            h.frame(&m, vec![]);
-            let point = h.point(|c| matches!(c, Control::ToggleFavoriteDownloads), 0.5);
-            let actions = h.click(&m, point);
-            assert!(actions
-                .iter()
-                .any(|a| matches!(a, Intent::ToggleFavoriteDownloads)));
-            assert!(h.ui.overlay.is_none());
-            m.downloads.busy = true;
-            h.frame(&m, vec![]);
-            assert_eq!(
-                h.ui.last_root
-                    .as_ref()
-                    .unwrap()
-                    .find("Favorite downloads")
-                    .unwrap()
-                    .children[0]
-                    .asset
-                    .as_deref(),
-                Some("x")
-            );
-            let point = h.point(|c| matches!(c, Control::ToggleFavoriteDownloads), 0.5);
-            assert!(h
-                .click(&m, point)
-                .iter()
-                .any(|a| matches!(a, Intent::ToggleFavoriteDownloads)));
-            assert!(h.ui.overlay.is_none());
-        }
+        let mut m = fixture();
+        let mut h = Harness::new();
+        h.size = size;
+        h.ui.page = Page::Favorites;
+        h.frame(&m, vec![]);
+        let point = h.point(|c| matches!(c, Control::ToggleFavoriteDownloads), 0.5);
+        let actions = h.click(&m, point);
+        assert!(actions
+            .iter()
+            .any(|a| matches!(a, Intent::ToggleFavoriteDownloads)));
+        assert!(h.ui.overlay.is_none());
+        m.downloads.busy = true;
+        h.frame(&m, vec![]);
+        assert_eq!(
+            h.ui.last_root
+                .as_ref()
+                .unwrap()
+                .find("Favorite downloads")
+                .unwrap()
+                .children[0]
+                .asset
+                .as_deref(),
+            Some("x")
+        );
+        let point = h.point(|c| matches!(c, Control::ToggleFavoriteDownloads), 0.5);
+        assert!(h
+            .click(&m, point)
+            .iter()
+            .any(|a| matches!(a, Intent::ToggleFavoriteDownloads)));
+        assert!(h.ui.overlay.is_none());
     }
+}
+
+#[test]
+fn media_library_opens_favorites_first_and_keeps_playlists_accessible() {
+    let _phone = crate::platform::mobile_for_test();
+    let m = fixture();
+    let mut h = Harness::new();
+    h.size = vec2(411., 838.);
+    h.frame(&m, vec![]);
+    let library = h.point(|c| matches!(c, Control::Navigate(Page::Favorites)), 0.5);
+    assert!(h
+        .click(&m, library)
+        .iter()
+        .any(|i| matches!(i, Intent::Navigate(Page::Favorites))));
+    h.frame(&m, vec![]);
+    let root = h.ui.last_root.as_ref().unwrap();
+    let tabs = root.find("Library filters").unwrap();
+    assert_eq!(
+        tabs.children
+            .iter()
+            .map(|n| n.name.as_str())
+            .collect::<Vec<_>>(),
+        ["tab/Понравившиеся", "tab/Плейлисты"]
+    );
+    assert!(root.find("button/Слушать всё").is_none());
+    assert!(root.find("button/Перемешать").is_none());
+    assert!(root.find("list/favorites").is_some());
+    let playlists = h.point(|c| matches!(c, Control::Navigate(Page::Playlists)), 0.5);
+    h.click(&m, playlists);
+    h.frame(&m, vec![]);
+    assert_eq!(h.ui.page, Page::Playlists);
+    let root = h.ui.last_root.as_ref().unwrap();
+    assert!(root
+        .find("Ваши коллекции синхронизируются из Яндекс Музыки.")
+        .is_none());
+    assert!(root.find("Playlist grid").is_some());
 }
 
 #[test]
@@ -795,7 +840,6 @@ fn every_tab_shares_ambient_and_fontawesome_masks_support_both_themes() {
     for page in [
         Page::Sonora,
         Page::Search,
-        Page::Library,
         Page::Favorites,
         Page::Playlists,
         Page::Playlist,
@@ -1382,13 +1426,13 @@ fn sonora_starts_with_one_actionable_card_and_waits_for_a_real_radio_batch() {
 fn listen_all_replaces_the_queue_as_one_collection_action() {
     let m = fixture();
     let mut h = Harness::new();
-    h.ui.page = Page::Favorites;
+    h.ui.page = Page::Playlist;
     h.frame(&m, vec![]);
     let p = h.point(|c| matches!(c, Control::Listen(false)), 0.5);
     let actions = h.click(&m, p);
     assert_eq!(actions.len(), 1);
     assert!(
-        matches!(&actions[0],Intent::PlayCollection(tracks,0)if tracks.len()==m.favorites.len())
+        matches!(&actions[0],Intent::PlayCollection(tracks,0)if tracks.len()==m.playlist_tracks.len())
     );
 }
 
@@ -1396,7 +1440,7 @@ fn listen_all_replaces_the_queue_as_one_collection_action() {
 fn shuffled_collection_keeps_every_track_and_can_restart_after_the_end() {
     let mut m = fixture();
     let mut h = Harness::new();
-    h.ui.page = Page::Favorites;
+    h.ui.page = Page::Playlist;
     h.frame(&m, vec![]);
     let p = h.point(|c| matches!(c, Control::Listen(true)), 0.5);
     let actions = h.click(&m, p);
@@ -1410,13 +1454,13 @@ fn shuffled_collection_keeps_every_track_and_can_restart_after_the_end() {
             }
         })
         .unwrap();
-    assert_eq!(tracks.len(), m.favorites.len());
+    assert_eq!(tracks.len(), m.playlist_tracks.len());
     assert_eq!(
         tracks
             .iter()
             .map(Track::key)
             .collect::<std::collections::HashSet<_>>(),
-        m.favorites.iter().map(Track::key).collect()
+        m.playlist_tracks.iter().map(Track::key).collect()
     );
     m.status.ended = true;
     m.status.playing = false;
@@ -1501,16 +1545,83 @@ fn native_navigation_and_modal_hit_testing() {
     let queue = h.point(|c| matches!(c, Control::Overlay(Overlay::Queue)), 0.5);
     h.click(&m, queue);
     assert_eq!(h.ui.overlay, Some(Overlay::Queue));
-    // A click over the obscured player dismisses the modal, without pausing audio.
+    // The full-screen queue intercepts clicks over the player beneath it.
     let play = h.ui.layout.surface_x + 368.;
     let actions = h.click(&m, pos2(play, h.ui.layout.player_y + 44.));
     assert!(!actions.iter().any(|a| matches!(a, Intent::Pause)));
+    assert_eq!(h.ui.overlay, Some(Overlay::Queue));
+    let close = h.point(|c| matches!(c, Control::Close), 0.5);
+    h.click(&m, close);
     assert_eq!(h.ui.overlay, None);
     h.frame(&m, vec![]);
     let p = h.point(|c| matches!(c, Control::PlayPause), 0.5);
     let actions = h.click(&m, p);
     assert!(actions.iter().any(|a| matches!(a, Intent::Pause)));
 }
+#[test]
+fn fullscreen_queue_opens_at_the_current_track_and_scrolls_to_future_tracks() {
+    let _phone = crate::platform::mobile_for_test();
+    let mut m = fixture();
+    m.queue = (0..60)
+        .map(|i| {
+            let mut track = m.queue[0].clone();
+            track.id = i.to_string();
+            track
+        })
+        .collect::<Vec<_>>()
+        .into();
+    m.cursor = Some(12);
+    let mut h = Harness::new();
+    h.size = vec2(411., 838.);
+    h.ui.zen = true;
+    h.ui.overlay = Some(Overlay::Queue);
+    h.frame(&m, vec![]);
+    let root = h.ui.last_overlay.as_ref().unwrap();
+    assert_eq!(vec2(root.width, root.height), h.size);
+    assert_eq!(root.fills[0]["opacity"], 1.);
+    assert!(root
+        .find("queue")
+        .unwrap()
+        .children
+        .iter()
+        .any(|n| n.characters == "Сейчас"));
+    assert!(root.find("queue/12").is_some());
+    assert_eq!(root.find("queue/12").unwrap().opacity, 1.);
+    assert_eq!(root.find("queue/13").unwrap().opacity, 1.);
+    assert!(root.find("Ваш поток, трек за треком").is_none());
+    assert!(root.find("Подобрано по вашей музыке в Last.fm").is_none());
+    let start = h.ui.renderer.regions["queue"].0.center();
+    let end = start - vec2(0., 160.);
+    let first_offset = h.ui.offsets["queue"];
+    h.frame(
+        &m,
+        vec![
+            Event::PointerMoved(start),
+            Event::PointerButton {
+                pos: start,
+                button: PointerButton::Primary,
+                pressed: true,
+                modifiers: Modifiers::NONE,
+            },
+        ],
+    );
+    h.frame(&m, vec![Event::PointerMoved(end)]);
+    let actions = h.frame(
+        &m,
+        vec![Event::PointerButton {
+            pos: end,
+            button: PointerButton::Primary,
+            pressed: false,
+            modifiers: Modifiers::NONE,
+        }],
+    );
+    assert!(h.ui.offsets["queue"] > first_offset + 100.);
+    assert!(!actions
+        .iter()
+        .any(|a| matches!(a, Intent::Zen(_) | Intent::QueueIndex(_))));
+    assert_eq!(h.ui.overlay, Some(Overlay::Queue));
+}
+
 #[test]
 fn eq_volume_and_timeline_use_real_continuous_values() {
     let m = fixture();
@@ -1603,9 +1714,9 @@ fn recognition_rings_are_centered_and_follow_capture_progress_and_volume() {
             .unwrap()
             .find("Glass dialog")
             .unwrap();
-    let idle = panel.find("Ellipse").unwrap().clone();
+    let idle = panel.clone();
     m.recording = Some(crate::recognition::Visual {
-        progress: 0.8,
+        progress: 0.2,
         level: 0.9,
         searching: false,
     });
@@ -1627,9 +1738,25 @@ fn recognition_rings_are_centered_and_follow_capture_progress_and_volume() {
         assert!((node.x + node.width / 2. - panel.width / 2.).abs() < 0.01);
         assert!((node.y + node.height / 2. - mic.y - mic.height / 2.).abs() < 0.01);
     }
-    assert!(rings[0].width > idle.width);
-    assert!(rings[0].fills[0]["color"]["g"].as_f64() > idle.fills[0]["color"]["g"].as_f64());
-    assert_eq!(mic.tint["r"], 1.);
+    let idle_rings: Vec<_> = idle
+        .children
+        .iter()
+        .filter(|n| n.kind == "ELLIPSE")
+        .collect();
+    assert!(rings[0].width > idle_rings[0].width);
+    assert_eq!(rings[0].fills, idle_rings[0].fills);
+    assert_eq!(rings[1].fills, idle_rings[1].fills);
+    assert_ne!(rings[2].fills, idle_rings[2].fills);
+    assert_eq!(mic.width, idle.find("icon/mic").unwrap().width);
+    assert_eq!(mic.tint, idle.find("icon/mic").unwrap().tint);
+    assert_eq!(mic.tint["g"], 1.);
+    let wave = panel.find("Recognition wave").unwrap().outline.clone();
+    assert_eq!(wave.len(), 96);
+    m.recording.as_mut().unwrap().progress = 0.85;
+    h.frame(&m, vec![]);
+    let root = h.ui.last_overlay.as_ref().unwrap();
+    assert_ne!(root.find("Recognition wave").unwrap().outline, wave);
+    assert_ne!(root.find("Ellipse").unwrap().fills, idle_rings[0].fills);
     m.recording.as_mut().unwrap().searching = true;
     h.frame(&m, vec![]);
     assert_eq!(

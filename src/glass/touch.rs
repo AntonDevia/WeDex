@@ -5,6 +5,7 @@ pub enum Area {
     None,
     Mini,
     Artwork,
+    Zen,
     Cards,
     Scroll,
     Slider,
@@ -85,7 +86,7 @@ impl Touch {
             return None;
         }
         let open = self.area == Area::Mini && self.delta.y < 0.;
-        let close = self.area == Area::Artwork && self.delta.y > 0.;
+        let close = self.pulls_zen_down();
         ((open || close)
             && (self.delta.y.abs()
                 > if open {
@@ -95,6 +96,11 @@ impl Touch {
                 }
                 || (self.delta.y.abs() > 28. && self.velocity.y.abs() > 700.)))
             .then_some(open)
+    }
+    pub fn pulls_zen_down(&self) -> bool {
+        self.axis == Axis::Vertical
+            && matches!(self.area, Area::Artwork | Area::Zen)
+            && self.delta.y > 0.
     }
     pub fn release(&mut self) {
         if self.axis == Axis::Vertical && self.area == Area::Scroll {
