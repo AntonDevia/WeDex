@@ -436,7 +436,7 @@ fn media_library_opens_favorites_first_and_keeps_playlists_accessible() {
             .iter()
             .map(|n| n.name.as_str())
             .collect::<Vec<_>>(),
-        ["tab/Понравившиеся", "tab/Плейлисты"]
+        ["tab/Понравившиеся", "tab/Плейлисты", "Импорт"]
     );
     assert!(root.find("button/Слушать всё").is_none());
     assert!(root.find("button/Перемешать").is_none());
@@ -450,6 +450,20 @@ fn media_library_opens_favorites_first_and_keeps_playlists_accessible() {
         .find("Ваши коллекции синхронизируются из Яндекс Музыки.")
         .is_none());
     assert!(root.find("Playlist grid").is_some());
+    let import = h.point(|c| matches!(c, Control::Overlay(Overlay::Import)), 0.5);
+    h.click(&m, import);
+    h.frame(&m, vec![]);
+    let vk = h.point(
+        |c| matches!(c, Control::ImportSource(crate::track_import::Source::Vk)),
+        0.5,
+    );
+    h.click(&m, vk);
+    h.ui.import_editor.text = "Исполнитель — Трек".into();
+    h.frame(&m, vec![]);
+    let start = h.point(|c| matches!(c, Control::StartImport), 0.5);
+    assert!(h.click(&m, start).iter().any(|intent| {
+        matches!(intent, Intent::Import(crate::track_import::Input::Text(crate::track_import::Source::Vk, text)) if text == "Исполнитель — Трек")
+    }));
 }
 
 #[test]
@@ -779,6 +793,7 @@ fn fixture() -> Model {
         query: String::new(),
         searching: false,
         loading_library: false,
+        track_import: Default::default(),
         loading_playlist: false,
         resolving: false,
         recording: None,

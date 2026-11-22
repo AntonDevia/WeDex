@@ -657,14 +657,18 @@ impl Renderer {
             };
             let mut job = egui::text::LayoutJob::single_section(n.characters.clone(), format);
             job.wrap.max_width = n.width * scale + 8.;
-            job.wrap.max_rows = if matches!(n.name.as_str(), "Lyric line" | "Release notes") {
+            let wrap_words = matches!(
+                n.name.as_str(),
+                "Lyric line" | "Release notes" | "Import hint" | "Import track"
+            );
+            job.wrap.max_rows = if wrap_words {
                 (n.height / line_height).round().max(1.) as usize
             } else if n.characters.contains('\n') {
                 3
             } else {
                 1
             };
-            job.wrap.break_anywhere = !matches!(n.name.as_str(), "Lyric line" | "Release notes");
+            job.wrap.break_anywhere = !wrap_words;
             let centered_lyrics = n.name == "Lyric line" && n.text_align_horizontal == "CENTER";
             if centered_lyrics {
                 job.halign = egui::Align::Center;

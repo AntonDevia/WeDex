@@ -299,15 +299,7 @@ impl Store {
     pub fn favorite(&self, track: &Track, add: bool) -> Result<()> {
         let tx = self.db.unchecked_transaction()?;
         if add {
-            tx.execute("DELETE FROM library_hidden WHERE key=?", [track.key()])?;
-            tx.execute(
-                "INSERT OR REPLACE INTO favorites(key,track,added) VALUES(?1,?2,?3)",
-                params![
-                    track.key(),
-                    serde_json::to_string(track)?,
-                    wedex_cloud::now_ms()
-                ],
-            )?;
+            Self::add_favorite(&tx, track)?;
         } else {
             tx.execute(
                 "INSERT OR REPLACE INTO library_hidden VALUES(?1,?2)",
@@ -315,31 +307,49 @@ impl Store {
             )?;
             tx.execute("DELETE FROM favorites WHERE key=?1", [track.key()])?;
             tx.execute("DELETE FROM imported WHERE key=?1", [track.key()])?;
+            library::enqueue_active(&tx, track, false)?;
         }
-        library::enqueue_active(&tx, track, add)?;
         tx.commit()?;
         Ok(())
     }
-    pub fn import_yandex(&self, tracks: &[Track]) -> Result<()> {
-        let existing = self
-            .favorites()?
-            .into_iter()
-            .map(|t| t.key())
-            .collect::<std::collections::HashSet<_>>();
+    fn add_favorite(tx: &Connection, track: &Track) -> Result<()> {
+        tx.execute("DELETE FROM library_hidden WHERE key=?", [track.key()])?;
+        tx.execute(
+            "INSERT OR REPLACE INTO favorites(key,track,added) VALUES(?1,?2,?3)",
+            params![
+                track.key(),
+                serde_json::to_string(track)?,
+                wedex_cloud::now_ms()
+            ],
+        )?;
+        library::enqueue_active(tx, track, true)?;
+        Ok(())
+    }
+    pub fn import_favorites(&self, tracks: &[Track]) -> Result<(usize, usize)> {
         let tx = self.db.unchecked_transaction()?;
-        tx.execute("DELETE FROM imported", [])?;
+        let favorites = self.favorites()?;
+        let mut identities: std::collections::HashSet<_> =
+            favorites.iter().map(Track::identity).collect();
+        let mut keys: std::collections::HashSet<_> = favorites.iter().map(Track::key).collect();
+        let mut added = 0;
+        let mut hidden = 0;
         for track in tracks {
-            tx.execute(
-                "INSERT OR REPLACE INTO imported VALUES(?1,?2)",
-                params![track.key(), serde_json::to_string(track)?],
-            )?;
-            if !existing.contains(&track.key()) && !library::hidden(&tx, &track.key())? {
-                library::enqueue_active(&tx, track, true)?;
-                tx.execute("INSERT OR IGNORE INTO favorites(key,track) SELECT ?1,?2 WHERE EXISTS(SELECT 1 FROM library_active)",params![track.key(),serde_json::to_string(track)?])?;
+            let identity = track.identity();
+            let key = track.key();
+            if identities.contains(&identity) || keys.contains(&key) {
+                continue;
+            }
+            if library::hidden(&tx, &key)? {
+                hidden += 1;
+            } else {
+                Self::add_favorite(&tx, track)?;
+                identities.insert(identity);
+                keys.insert(key);
+                added += 1;
             }
         }
         tx.commit()?;
-        Ok(())
+        Ok((added, hidden))
     }
     pub fn history(&self) -> Result<Vec<Track>> {
         let mut stmt = self
@@ -447,14 +457,25 @@ mod tests {
     }
     use crate::model::tests::track;
     #[test]
-    fn sync_replaces_snapshot_preserving_local_favorites() {
+    fn importing_favorites_preserves_legacy_rows_and_deduplicates_between_catalogs() {
         let store = Store::initialize(Connection::open_in_memory().unwrap()).unwrap();
         let a = track("a", "artist", 200);
         let b = track("b", "artist", 200);
-        store.import_yandex(std::slice::from_ref(&a)).unwrap();
-        store.favorite(&b, true).unwrap();
+        store
+            .db
+            .execute(
+                "INSERT INTO imported VALUES (?1,?2)",
+                params![a.key(), serde_json::to_string(&a).unwrap()],
+            )
+            .unwrap();
+        let mut duplicate = a;
+        duplicate.provider = crate::model::Provider::YouTube;
+        assert_eq!(
+            store.import_favorites(&[duplicate, b.clone()]).unwrap(),
+            (1, 0)
+        );
         assert_eq!(store.favorites().unwrap().len(), 2);
-        store.import_yandex(&[]).unwrap();
+        assert_eq!(store.import_favorites(&[b]).unwrap(), (0, 0));
         assert_eq!(store.favorites().unwrap()[0].id, "b");
     }
     #[test]

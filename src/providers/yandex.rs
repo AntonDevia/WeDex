@@ -1,5 +1,6 @@
 use super::*;
 use crate::model::ArtistPage;
+use crate::track_import::Song;
 use serde_json::json;
 
 #[derive(Clone)]
@@ -16,12 +17,17 @@ impl Services {
         if self.yandex.is_empty() {
             bail!("Подключите Яндекс Музыку в настройках");
         }
-        let value = request_json(
-            self.http
-                .get(format!("https://api.music.yandex.net/{path}"))
-                .header("Authorization", format!("OAuth {}", self.yandex))
-                .query(params),
-        )?;
+        self.ym_get(path, params)
+    }
+    fn ym_get(&self, path: &str, params: &[(&str, &str)]) -> Result<Value> {
+        let mut request = self
+            .http
+            .get(format!("https://api.music.yandex.net/{path}"))
+            .query(params);
+        if !self.yandex.is_empty() {
+            request = request.header("Authorization", format!("OAuth {}", self.yandex));
+        }
+        let value = request_json(request)?;
         if let Some(error) = value.get("error") {
             bail!("Яндекс: {}", text(error, "message"));
         }
@@ -92,12 +98,16 @@ impl Services {
         }
         Ok(result)
     }
-    pub fn yandex_library(&self) -> Result<(Vec<Track>, Vec<Playlist>, String)> {
+    fn yandex_account(&self) -> Result<(String, String)> {
         let account = self.ym("account/status", &[])?;
         let uid = id(&account["account"]["uid"]);
         if uid.is_empty() {
             bail!("Яндекс не вернул ID аккаунта");
         }
+        Ok((uid, text(&account["account"], "displayName")))
+    }
+    pub fn yandex_liked_metadata(&self) -> Result<Vec<Song>> {
+        let (uid, _) = self.yandex_account()?;
         let likes = self.ym(&format!("users/{uid}/likes/tracks"), &[])?;
         let ids: Vec<String> = likes
             .pointer("/library/tracks")
@@ -119,8 +129,12 @@ impl Services {
             let items = value["result"]
                 .as_array()
                 .context("Не удалось получить метаданные понравившихся")?;
-            tracks.extend(items.iter().filter_map(parse_track));
+            tracks.extend(items.iter().filter_map(song_metadata));
         }
+        Ok(tracks)
+    }
+    pub fn yandex_playlists(&self) -> Result<(Vec<Playlist>, String)> {
+        let (uid, name) = self.yandex_account()?;
         let list = self.ym(&format!("users/{uid}/playlists/list"), &[])?;
         let playlists = list
             .as_array()
@@ -145,19 +159,29 @@ impl Services {
                     .collect()
             })
             .unwrap_or_default();
-        let name = text(&account["account"], "displayName");
-        Ok((tracks, playlists, name))
+        Ok((playlists, name))
     }
     pub fn yandex_playlist(&self, playlist: &Playlist) -> Result<Vec<Track>> {
-        let value = self.ym(
+        let value = self.ym_get(
             &format!("users/{}/playlists/{}", playlist.uid, playlist.kind),
-            &[],
+            &[("rich-tracks", "true")],
         )?;
+        self.yandex_playlist_items(value, parse_track)
+    }
+    pub fn yandex_playlist_metadata(&self, path: &str) -> Result<Vec<Song>> {
+        let value = self.ym_get(path, &[("rich-tracks", "true"), ("richTracks", "true")])?;
+        self.yandex_playlist_items(value, song_metadata)
+    }
+    fn yandex_playlist_items<T>(
+        &self,
+        value: Value,
+        parse: fn(&Value) -> Option<T>,
+    ) -> Result<Vec<T>> {
         let mut tracks = Vec::new();
         let mut ids = Vec::new();
         if let Some(items) = value.get("tracks").and_then(Value::as_array) {
             for item in items {
-                if let Some(t) = item.get("track").and_then(parse_track) {
+                if let Some(t) = item.get("track").and_then(parse) {
                     tracks.push(t);
                 } else {
                     let value = id(&item["id"]);
@@ -168,9 +192,9 @@ impl Services {
             }
         }
         for batch in ids.chunks(100) {
-            let value = self.ym("tracks", &[("track-ids", &batch.join(","))])?;
+            let value = self.ym_get("tracks", &[("track-ids", &batch.join(","))])?;
             if let Some(items) = value.as_array() {
-                tracks.extend(items.iter().filter_map(parse_track));
+                tracks.extend(items.iter().filter_map(parse));
             }
         }
         Ok(tracks)
@@ -216,6 +240,11 @@ impl Services {
             path
         ))
     }
+}
+
+fn song_metadata(value: &Value) -> Option<Song> {
+    let track = parse_track(value)?;
+    Song::new(&track.title, &track.artist)
 }
 
 fn parse_artist(v: &Value) -> Option<Artist> {

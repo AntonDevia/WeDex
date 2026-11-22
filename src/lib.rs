@@ -17,6 +17,7 @@ mod platform;
 mod providers;
 mod recognition;
 mod store;
+mod track_import;
 mod tray;
 mod updates;
 mod wave_feedback;

@@ -522,6 +522,15 @@ impl Services {
     pub fn search_progress(&self, query: &str, all: bool, publish: impl Fn(SearchResult) + Sync) {
         self.search_catalog(query, all, true, &publish);
     }
+    pub fn search_all_tracks(&self, query: &str) -> (SearchResult, bool) {
+        let result = std::sync::Mutex::new((SearchResult::default(), false));
+        self.search_catalog(query, true, false, &|batch| {
+            let (result, completed) = &mut *result.lock().unwrap();
+            *completed |= batch.notices.is_empty();
+            result.merge(batch);
+        });
+        result.into_inner().unwrap()
+    }
     fn search_catalog(
         &self,
         query: &str,
@@ -588,11 +597,7 @@ impl Services {
         }
     }
     pub fn alternatives(&self, seed: &Track) -> SearchResult {
-        let result = std::sync::Mutex::new(SearchResult::default());
-        self.search_catalog(&seed.query(), true, false, &|batch| {
-            result.lock().unwrap().merge(batch)
-        });
-        let mut result = result.into_inner().unwrap();
+        let (mut result, _) = self.search_all_tracks(&seed.query());
         for t in &mut result.tracks {
             t.score = match_score(seed, t);
         }

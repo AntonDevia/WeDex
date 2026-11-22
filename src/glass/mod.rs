@@ -8,6 +8,7 @@ mod composite;
 mod connections;
 mod cover_cache;
 mod feedback;
+mod import;
 mod layout;
 mod lyrics_view;
 mod mobile_motion;
@@ -29,6 +30,7 @@ use crate::{
     model::{self, Edition, Provider, Track},
     providers::yandex::Playlist,
     store::{Settings, ThemePreference},
+    track_import,
 };
 use eframe::egui::{self, pos2, vec2, Color32, FontFamily, FontId, Rect};
 use scene::{Node, Transform};
@@ -84,6 +86,7 @@ pub enum Overlay {
     Recognition,
     Recognized,
     Versions,
+    Import,
 }
 #[derive(Clone)]
 pub enum Intent {
@@ -122,7 +125,9 @@ pub enum Intent {
     Zen(bool),
     Repeat(bool),
     Discovery(f32),
-    Sync,
+    Import(track_import::Input),
+    PickImportFile(track_import::Source),
+    CancelImport,
     Playlist(usize),
     Versions(Track),
     SaveVersion(Track, Track),
@@ -178,7 +183,11 @@ pub(super) enum Control {
     Playlist(usize),
     Search,
     Mic,
-    Sync,
+    ImportSource(track_import::Source),
+    StartImport,
+    ImportLikes,
+    PickImportFile,
+    CancelImport,
     Listen(bool),
     Preset(usize),
     Preamp,
@@ -225,6 +234,7 @@ pub struct Model {
     pub query: String,
     pub searching: bool,
     pub loading_library: bool,
+    pub track_import: track_import::View,
     pub loading_playlist: bool,
     pub resolving: bool,
     pub(crate) recording: Option<crate::recognition::Visual>,
@@ -255,6 +265,7 @@ pub struct GlassUi {
     touch_long: bool,
     pub cloud_view: crate::cloud::View,
     cloud_editor: cloud::Editor,
+    import_editor: import::Editor,
     lyrics_manual_until: f64,
     lyrics_manual_offset: Option<f32>,
     lyrics_manual_visibility: transitions::Tween,
@@ -348,6 +359,7 @@ impl GlassUi {
             touch_long: false,
             cloud_view: Default::default(),
             cloud_editor: Default::default(),
+            import_editor: Default::default(),
             lyrics_manual_until: -1.,
             lyrics_manual_offset: None,
             lyrics_manual_visibility: transitions::Tween::new(0.),
@@ -1179,6 +1191,7 @@ impl GlassUi {
                         && n.characters.contains("SoundCloud")
                         && n.characters.contains("YouTube Music"))
                         && n.name != "Ваши коллекции синхронизируются из Яндекс Музыки."
+                        && n.name != "button/refresh-cw"
                 });
                 if let Some(tabs) = root.find_mut("Library filters") {
                     tabs.children.retain(|tab| tab.name != "tab/Обзор");
@@ -1189,8 +1202,16 @@ impl GlassUi {
                     {
                         n.command = Some(Control::Navigate(page));
                     }
+                    tabs.children.push(panels::button(
+                        "Импорт",
+                        0.,
+                        0.,
+                        120.,
+                        40.,
+                        Control::Overlay(Overlay::Import),
+                        false,
+                    ));
                 }
-                Self::command(&mut root, "button/refresh-cw", Control::Sync);
                 if self.page == Page::Favorites {
                     root.children.retain(|n| {
                         !n.name.starts_with("track/")
@@ -1248,7 +1269,7 @@ impl GlassUi {
                                     if m.loading_library {
                                         "Загружаем плейлисты…"
                                     } else {
-                                        "Подключите Яндекс Музыку в настройках"
+                                        "Здесь появятся ваши плейлисты"
                                     },
                                     0.,
                                     20.,
@@ -1303,6 +1324,9 @@ impl GlassUi {
     }
     fn compose_overlay(&mut self, ctx: &egui::Context, m: &Model) -> Option<Node> {
         let overlay = self.overlay?;
+        if overlay == Overlay::Import {
+            return Some(import::compose(self, m));
+        }
         if overlay == Overlay::Updates {
             return Some(updates::panel(self, ctx, m));
         }
@@ -1331,6 +1355,7 @@ impl GlassUi {
             return Some(self.queue_overlay(ctx, m));
         }
         let id = match overlay {
+            Overlay::Import => unreachable!(),
             Overlay::TrackActions => unreachable!(),
             Overlay::Updates => unreachable!(),
             Overlay::Cloud | Overlay::Devices => unreachable!(),
@@ -1368,6 +1393,7 @@ impl GlassUi {
         Self::command(&mut root, "Glass dialog", Control::Noop);
         Self::command(&mut root, "button/x", Control::Close);
         match overlay {
+            Overlay::Import => unreachable!(),
             Overlay::TrackActions => unreachable!(),
             Overlay::Updates => unreachable!(),
             Overlay::Cloud | Overlay::Devices => unreachable!(),
@@ -1972,7 +1998,21 @@ impl GlassUi {
                 out.push(Intent::Recognize);
             }
             Control::Search => self.submit_search(out),
-            Control::Sync => out.push(Intent::Sync),
+            Control::ImportSource(source) => {
+                self.import_editor.source = source;
+                out.push(Intent::CancelImport);
+            }
+            Control::StartImport => {
+                out.push(Intent::Import(self.import_editor.input()));
+            }
+            Control::ImportLikes => out.push(Intent::Import(track_import::Input::YandexLikes)),
+            Control::PickImportFile => out.push(Intent::PickImportFile(self.import_editor.source)),
+            Control::CancelImport => {
+                if matches!(m.track_import, track_import::View::Finished(_)) {
+                    self.import_editor.text.clear();
+                }
+                out.push(Intent::CancelImport);
+            }
             Control::Listen(shuffle) => {
                 let tracks = if self.page == Page::Playlist {
                     &m.playlist_tracks
@@ -2133,6 +2173,9 @@ impl GlassUi {
         }
         if self.overlay == Some(Overlay::Cloud) {
             cloud::input(self, ui);
+        }
+        if self.overlay == Some(Overlay::Import) {
+            import::input(self, ui);
         }
         if !ctx.wants_keyboard_input() {
             if ctx.input(|i| i.key_pressed(egui::Key::Space)) {

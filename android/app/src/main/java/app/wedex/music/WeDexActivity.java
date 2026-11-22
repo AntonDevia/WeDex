@@ -34,6 +34,10 @@ public final class WeDexActivity extends GameActivity {
     public static native void nativeForeground(int foreground);
     public static native void nativeTheme(int dark);
     public static native void nativeText(long generation, String text, int start, int end);
+    private static native void nativeImportFile(long id, int status, byte[] contents);
+    private static final int PICK_IMPORT_FILE = 83;
+    private static final int IMPORT_FILE_LIMIT = 8 * 1024 * 1024;
+    private long importFileId;
     public static native void nativeSubmit();
     public static native void nativeInvitation(String value);
     public static native void nativeConnectivity(int value);
@@ -96,6 +100,50 @@ public final class WeDexActivity extends GameActivity {
         if (intent != null && intent.getData() != null && "wedex-cloud".equals(intent.getData().getScheme())) nativeInvitation(intent.getData().toString());
     }
     @Override protected void onResume() { super.onResume(); foreground = true; nativeForeground(1); if(pendingUpdate!=null && getPackageManager().canRequestPackageInstalls()) wedexInstallUpdate(pendingUpdate); }
+    public void wedexPickImportFile(long id) {
+        runOnUiThread(() -> {
+            importFileId = id;
+            Intent picker = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            picker.addCategory(Intent.CATEGORY_OPENABLE);
+            picker.setType("*/*");
+            try {
+                startActivityForResult(picker, PICK_IMPORT_FILE);
+            } catch (RuntimeException error) {
+                nativeImportFile(id, 3, null);
+            }
+        });
+    }
+    @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != PICK_IMPORT_FILE) return;
+        long id = importFileId;
+        if (resultCode != RESULT_OK || data == null || data.getData() == null) {
+            nativeImportFile(id, 0, null);
+            return;
+        }
+        Uri uri = data.getData();
+        new Thread(() -> {
+            try (java.io.InputStream stream = getContentResolver().openInputStream(uri);
+                 java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream()) {
+                if (stream == null) {
+                    nativeImportFile(id, 3, null);
+                    return;
+                }
+                byte[] buffer = new byte[8192];
+                int count;
+                while ((count = stream.read(buffer)) != -1) {
+                    if (output.size() + count > IMPORT_FILE_LIMIT) {
+                        nativeImportFile(id, 2, null);
+                        return;
+                    }
+                    output.write(buffer, 0, count);
+                }
+                nativeImportFile(id, 1, output.toByteArray());
+            } catch (java.io.IOException | RuntimeException error) {
+                nativeImportFile(id, 3, null);
+            }
+        }, "track-import-file").start();
+    }
     @Override protected void onPause() { foreground = false; nativeForeground(0); super.onPause(); }
     @Override public void onConfigurationChanged(android.content.res.Configuration config) {
         super.onConfigurationChanged(config);

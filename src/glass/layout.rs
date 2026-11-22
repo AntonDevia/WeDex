@@ -282,7 +282,7 @@ impl Layout {
                 }
                 "Library filters" => {
                     let gap = 4.;
-                    let width = ((self.main_width - 48. - gap) / 2.).min(168.);
+                    let width = ((self.main_width - 2. * gap) / 3.).min(168.);
                     for (i, tab) in n.children.iter_mut().enumerate() {
                         tab.move_to(i as f32 * (width + gap), 0.);
                         tab.width = width;
@@ -342,12 +342,6 @@ impl Layout {
                 if n.name == "Версии в каталогах" {
                     n.move_to(n.x, 320.);
                 }
-            }
-            if page == Page::Favorites && n.name == "button/refresh-cw" {
-                n.move_to(
-                    self.main_x + self.main_width - n.width,
-                    if self.size.y < 700. { 184. } else { 208. },
-                );
             }
             bottom = bottom.max(n.y + n.height);
             content.push(n);

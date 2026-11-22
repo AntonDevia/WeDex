@@ -268,7 +268,7 @@ mod tests {
             .unwrap();
         assert!(s.favorites().unwrap().is_empty());
         assert!(s.library_request("server").unwrap().1.is_empty());
-        s.import_yandex(&[t]).unwrap();
+        assert_eq!(s.import_favorites(&[t]).unwrap(), (0, 1));
         assert!(
             s.favorites().unwrap().is_empty(),
             "Import must not resurrect a synchronized deletion"
@@ -301,9 +301,9 @@ mod tests {
         let db = Connection::open_in_memory().unwrap();
         let s = Store::initialize(db).unwrap();
         let t = crate::model::tests::track("song", "Artist", 200);
-        s.import_yandex(std::slice::from_ref(&t)).unwrap();
+        s.import_favorites(std::slice::from_ref(&t)).unwrap();
         s.library_attach("a").unwrap();
-        s.import_yandex(&[]).unwrap();
+        s.import_favorites(&[]).unwrap();
         assert_eq!(s.favorites().unwrap().len(), 1);
         let id = s.library_request("a").unwrap().1[0].id.clone();
         let s = Store::initialize(s.db).unwrap();

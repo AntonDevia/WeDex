@@ -2,8 +2,8 @@ use crate::{app::App, audio};
 use anyhow::{Context, Result};
 use eframe::egui;
 use jni::{
-    objects::{JClass, JObject, JString, JValue},
-    sys::{jbyteArray, jfloat, jint},
+    objects::{JByteArray, JClass, JObject, JString, JValue},
+    sys::{jbyteArray, jfloat, jint, jlong},
     JNIEnv, JavaVM,
 };
 use std::{
@@ -20,6 +20,8 @@ use winit::platform::android::activity::AndroidApp;
 static ACTIVITY: OnceLock<Mutex<Option<AndroidApp>>> = OnceLock::new();
 static COMMANDS: Mutex<VecDeque<(i32, f32)>> = Mutex::new(VecDeque::new());
 static INVITATION: Mutex<Option<String>> = Mutex::new(None);
+type ImportFile = (u64, Result<Option<String>>);
+static IMPORT_FILE: Mutex<Option<ImportFile>> = Mutex::new(None);
 static FOREGROUND: AtomicBool = AtomicBool::new(true);
 static DARK: AtomicBool = AtomicBool::new(false);
 static WAKE: OnceLock<Mutex<Option<egui::Context>>> = OnceLock::new();
@@ -78,6 +80,43 @@ pub fn paste() -> Result<String> {
             .l()?;
         Ok(env.get_string(&JString::from(value))?.into())
     })
+}
+pub fn pick_import_file(id: u64) -> Result<()> {
+    with_activity(|env, activity| {
+        env.call_method(
+            activity,
+            "wedexPickImportFile",
+            "(J)V",
+            &[JValue::Long(id as jlong)],
+        )?;
+        Ok(())
+    })
+}
+pub fn take_import_file() -> Option<ImportFile> {
+    IMPORT_FILE.lock().unwrap().take()
+}
+#[no_mangle]
+pub extern "system" fn Java_app_wedex_music_WeDexActivity_nativeImportFile(
+    env: JNIEnv,
+    _class: JClass,
+    id: jlong,
+    status: jint,
+    bytes: JByteArray<'_>,
+) {
+    let result = match status {
+        0 => Ok(None),
+        1 => env
+            .convert_byte_array(bytes)
+            .map_err(anyhow::Error::from)
+            .and_then(crate::track_import::file::decode)
+            .map(Some),
+        2 => Err(anyhow::anyhow!("Размер списка превышает 8 МБ")),
+        _ => Err(anyhow::anyhow!("Не удалось открыть файл")),
+    };
+    *IMPORT_FILE.lock().unwrap() = Some((id as u64, result));
+    if let Some(ctx) = WAKE.get().and_then(|cell| cell.lock().unwrap().clone()) {
+        ctx.request_repaint();
+    }
 }
 pub fn write_secret(name: &str, value: &str) -> Result<()> {
     with_activity(|env, activity| {

@@ -5,7 +5,10 @@ use crate::{
     providers::{yandex::Playlist, SearchResult, Services},
     recognition,
     store::{self, Settings, Store, ThemePreference},
+    track_import,
 };
+
+mod import;
 use eframe::egui::{self, Color32, FontId, Vec2};
 use std::{
     collections::{HashMap, HashSet},
@@ -41,7 +44,10 @@ enum Event {
     Wave(u64, crate::providers::wave::Batch, bool),
     Resolved(u64, Result<Track, String>),
     Prefetched(String, Result<Track, String>),
-    Library(u64, Result<(Vec<Track>, Vec<Playlist>, String), String>),
+    Playlists(u64, Result<(Vec<Playlist>, String), String>),
+    Import(u64, Result<(Vec<Track>, track_import::Report), String>),
+    #[cfg(windows)]
+    ImportFile(u64, Result<Option<String>, String>),
     Playlist(u64, Result<Vec<Track>, String>),
     Alternatives(Track, SearchResult),
     Recognition(u64, Result<Track, String>),
@@ -69,7 +75,7 @@ pub struct App {
     updates: crate::updates::Updates,
     cloud: crate::cloud::Cloud,
     sonora_ready: bool,
-    start_after_library: bool,
+    track_import: import::State,
     artists: Vec<crate::model::Artist>,
     artist: Option<crate::model::ArtistCatalog>,
     artist_request: u64,
@@ -234,7 +240,7 @@ impl App {
             updates: Default::default(),
             cloud: crate::cloud::Cloud::new(preview.is_some()),
             sonora_ready: false,
-            start_after_library: false,
+            track_import: Default::default(),
             artists: Vec::new(),
             artist: None,
             artist_request: 0,
@@ -310,7 +316,7 @@ impl App {
         if let Some(page) = preview {
             app.install_preview(&page);
         } else if !app.services.yandex.is_empty() {
-            app.sync();
+            app.load_playlists();
         }
         app
     }
@@ -449,11 +455,16 @@ impl App {
                     Provider::Yandex => {
                         self.library_request = self.library_request.wrapping_add(1);
                         self.loading_library = false;
+                        if self.yandex_token != value {
+                            self.playlists.clear();
+                            self.playlist_tracks.clear();
+                            self.playlist_request = self.playlist_request.wrapping_add(1);
+                            self.loading_playlist = false;
+                            self.account.clear();
+                            self.track_import.cancel();
+                        }
                         self.yandex_token = value.clone();
                         self.services.yandex = value.clone();
-                        if value.is_empty() {
-                            self.account.clear();
-                        }
                     }
                     Provider::LastFm => {
                         self.lastfm_key = value.clone();
@@ -476,7 +487,7 @@ impl App {
                     self.interface.connection_updated(provider, &value);
                 }
                 if provider == Provider::Yandex && !value.is_empty() {
-                    self.sync();
+                    self.load_playlists();
                 }
             }
             Err(error) => {
@@ -545,7 +556,6 @@ impl App {
         });
     }
     fn launch_radio(&mut self) {
-        self.start_after_library = false;
         let mut seeds = vec![];
         if !self.settings.last_artist.trim().is_empty()
             && !self.settings.last_title.trim().is_empty()
@@ -605,10 +615,6 @@ impl App {
         self.settings.last_title.clear();
         self.persist();
         self.tab = Tab::Sonora;
-        if self.favorites.is_empty() && self.loading_library && self.services.yandex.is_empty() {
-            self.start_after_library = true;
-            return;
-        }
         if self.favorites.is_empty() && self.services.yandex.is_empty() {
             self.message = "Добавьте треки в понравившиеся, чтобы запустить Sonora".into();
             return;
@@ -619,7 +625,6 @@ impl App {
         if index >= tracks.len() {
             return;
         }
-        self.start_after_library = false;
         self.radio_id += 1;
         self.generating = false;
         self.refill_cursor = None;
@@ -776,7 +781,6 @@ impl App {
     fn handle_action(&mut self, action: Action) {
         match action {
             Action::Play(track) => {
-                self.start_after_library = false;
                 self.radio_id += 1;
                 self.generating = false;
                 self.refill_cursor = None;
@@ -806,7 +810,6 @@ impl App {
             Action::Radio(track) => {
                 self.wave_feedback.finish();
                 self.wave = None;
-                self.start_after_library = false;
                 self.sonora_ready = true;
                 self.settings.last_artist = track.artist.clone();
                 self.settings.last_title = track.title.clone();
@@ -838,14 +841,14 @@ impl App {
             }
         }
     }
-    fn sync(&mut self) {
+    fn load_playlists(&mut self) {
         if self.loading_library {
             return;
         }
         self.loading_library = true;
         self.library_request = self.library_request.wrapping_add(1);
         let id = self.library_request;
-        self.job(move |s| Event::Library(id, s.yandex_library().map_err(|e| e.to_string())));
+        self.job(move |s| Event::Playlists(id, s.yandex_playlists().map_err(|e| e.to_string())));
     }
     fn poll(&mut self) {
         while let Ok(event) = self.rx.try_recv() {
@@ -1025,31 +1028,15 @@ impl App {
                         }
                     }
                 }
-                Event::Library(id, result) if id == self.library_request => {
+                Event::Import(id, result) => self.finish_import(id, result),
+                #[cfg(windows)]
+                Event::ImportFile(id, result) => self.import_file(id, result),
+                Event::Playlists(id, result) if id == self.library_request => {
                     self.loading_library = false;
-                    let start_radio = std::mem::take(&mut self.start_after_library);
                     match result {
-                        Ok((tracks, playlists, name)) => {
-                            if let Some(store) = &self.store {
-                                if let Err(e) = store.import_yandex(&tracks) {
-                                    self.report_error("import", e.to_string());
-                                    continue;
-                                }
-                                self.favorites =
-                                    store.favorites().unwrap_or_else(|_| tracks.clone());
-                            } else {
-                                self.favorites = tracks.clone();
-                            }
+                        Ok((playlists, name)) => {
                             self.playlists = playlists;
                             self.account = name;
-                            self.message = format!(
-                                "Импортировано {} понравившихся треков и {} плейлистов",
-                                tracks.len(),
-                                self.playlists.len()
-                            );
-                            if start_radio {
-                                self.launch_radio();
-                            }
                         }
                         Err(e) => self.report_error("service", e),
                     }
@@ -1415,7 +1402,7 @@ impl App {
             player_liked: None,
             updates: self.updates.view.clone(),
             sonora_ready: self.sonora_ready,
-            sonora_loading: self.generating || self.start_after_library,
+            sonora_loading: self.generating,
             error_generation: self.error_generation,
             settings: self.settings.clone(),
             status: self
@@ -1440,6 +1427,7 @@ impl App {
             query: self.query.clone(),
             searching: self.searching,
             loading_library: self.loading_library,
+            track_import: self.track_import.view.clone(),
             loading_playlist: self.loading_playlist,
             resolving: self.resolving,
             recording: self.recording.as_ref().map(|capture| capture.visual()),
@@ -1618,6 +1606,10 @@ impl App {
         #[cfg(target_os = "android")]
         if let Some(invitation) = crate::android::take_invitation() {
             self.interface.prefill_cloud_invitation(invitation);
+        }
+        #[cfg(target_os = "android")]
+        if let Some((id, result)) = crate::android::take_import_file() {
+            self.import_file(id, result.map_err(|error| error.to_string()));
         }
         #[cfg(target_os = "android")]
         if !crate::android::foreground() && !self.settings.close_to_tray {
@@ -2001,7 +1993,6 @@ impl App {
                 }
             }
             Intent::Radio(track) => {
-                self.start_after_library = false;
                 self.sonora_ready = true;
                 if self.interface.page == Page::Search && self.preview_status.is_none() {
                     self.settings
@@ -2104,11 +2095,9 @@ impl App {
                     }
                 }
             }
-            Intent::Sync => {
-                if self.preview_status.is_none() {
-                    self.sync();
-                }
-            }
+            Intent::Import(input) => self.begin_import(input),
+            Intent::PickImportFile(source) => self.pick_import_file(source),
+            Intent::CancelImport => self.track_import.cancel(),
             Intent::Playlist(index) => {
                 if let Some(playlist) = self.playlists.get(index).cloned() {
                     self.playlist_title = playlist.title.clone();
@@ -2624,10 +2613,7 @@ mod tests {
         app.library_request = 10;
         app.loading_library = true;
         app.tx
-            .send(Event::Library(
-                9,
-                Ok((Vec::new(), Vec::new(), "Old account".into())),
-            ))
+            .send(Event::Playlists(9, Ok((Vec::new(), "Old account".into()))))
             .unwrap();
         app.poll();
         assert_ne!(app.account, "Old account");
@@ -2691,16 +2677,15 @@ mod tests {
         assert_eq!(app.results.len(), 2);
     }
     #[test]
-    fn fresh_sonora_waits_for_click_and_library_sync_before_using_favorites() {
+    fn fresh_sonora_waits_for_click_and_playlist_loading_does_not_change_favorites() {
         let mut directed =
             App::with_context(&egui::Context::default(), Some("sonora-start".into()));
-        directed.start_after_library = true;
         directed.play_collection(directed.favorites.clone(), 0);
-        assert!(!directed.start_after_library && !directed.sonora_ready);
+        assert!(!directed.sonora_ready);
         directed.glass_action(Intent::Radio(directed.favorites[0].clone()));
         assert!(directed.sonora_ready);
         let mut app = App::with_context(&egui::Context::default(), Some("sonora-start".into()));
-        assert!(!app.sonora_ready && !app.generating && !app.start_after_library);
+        assert!(!app.sonora_ready && !app.generating);
         assert!(app.queue.is_empty());
         app.preview_status = None;
         app.favorites.clear();
@@ -2708,24 +2693,22 @@ mod tests {
         app.settings.last_artist = "Previous artist".into();
         app.settings.last_title = "Previous seed".into();
         app.reset_radio();
-        assert!(app.start_after_library);
+        assert!(!app.generating);
         assert!(app.settings.last_artist.is_empty() && app.settings.last_title.is_empty());
         app.tx
-            .send(Event::Library(0, Err("fixture offline".into())))
+            .send(Event::Playlists(0, Err("fixture offline".into())))
             .unwrap();
         app.poll();
-        assert!(!app.start_after_library && !app.sonora_ready);
-        app.loading_library = true;
-        app.reset_radio();
+        assert!(!app.sonora_ready);
         let track = crate::model::tests::track("Favorite seed", "Artist", 100);
+        app.favorites.push(track.clone());
         app.tx
-            .send(Event::Library(
-                0,
-                Ok((vec![track.clone()], vec![], "Fixture".into())),
-            ))
+            .send(Event::Playlists(0, Ok((vec![], "Fixture".into()))))
             .unwrap();
         app.poll();
-        assert!(!app.start_after_library && !app.sonora_ready);
+        assert_eq!(app.favorites[0].identity(), track.identity());
+        app.reset_radio();
+        assert!(!app.sonora_ready);
         assert_eq!(app.settings.recent_radio_seeds, vec![track.identity()]);
         app.tx
             .send(Event::Recommendations(app.radio_id, Ok(vec![track]), false))
