@@ -157,6 +157,7 @@ mod tests {
         let track = crate::model::tests::track("Song", "Artist", 200);
         let session = Session {
             id: "fixture-session".into(),
+            station: "user:onyourwave".into(),
             batches: [(track.id.clone(), "batch".into())].into(),
             received: vec![track.id.clone()],
         };

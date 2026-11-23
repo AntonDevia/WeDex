@@ -121,7 +121,15 @@ pub(super) fn panel(ui: &mut GlassUi) -> Node {
     let provider = editor.provider;
     let youtube = provider == Provider::YouTube;
     let (mut root, mut p) = super::panels::panel(ui, provider.label(), 620., 456.);
-    let mut viewport = body(ui, &p, 260.);
+    let mut viewport = body(
+        ui,
+        &p,
+        if provider == Provider::Yandex {
+            308.
+        } else {
+            260.
+        },
+    );
     let b = &mut viewport.children[0];
     let w = b.width;
     let label = match provider {
@@ -200,6 +208,7 @@ pub(super) fn panel(ui: &mut GlassUi) -> Node {
         false,
     ));
     let note = match provider {
+        Provider::Yandex => "Моя волна подбирает музыку по вашему закрытому плейлисту wedex-yandex. Перенос треков находится в Медиатеке.",
         Provider::Hitmotop if w < 400. => "Только домен — пути запросов прежние.",
         Provider::Hitmotop => "Меняется только домен. Пути запросов остаются прежними.",
         Provider::YouTube => "Воспроизведение зависит от доступности записи.",
@@ -217,7 +226,22 @@ pub(super) fn panel(ui: &mut GlassUi) -> Node {
         false,
     );
     note.opacity = 0.6;
+    if provider == Provider::Yandex {
+        note.name = "Import hint".into();
+        note.height = 46.;
+    }
     b.children.push(note);
+    if provider == Provider::Yandex {
+        b.children.push(button(
+            "Импорт треков",
+            0.,
+            status_y + 192.,
+            w.min(210.),
+            36.,
+            Control::Overlay(Overlay::Import),
+            false,
+        ));
+    }
     p.children.push(viewport);
     let button_w = (p.width - 64.) / 2.;
     p.children.push(button(

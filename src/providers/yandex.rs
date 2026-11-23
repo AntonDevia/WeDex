@@ -13,6 +13,13 @@ pub struct Playlist {
 }
 
 impl Services {
+    pub(super) fn ym_url(&self, path: &str) -> String {
+        let origin = "https://api.music.yandex.net";
+        #[cfg(test)]
+        let origin = self.yandex_test_origin.as_deref().unwrap_or(origin);
+        format!("{origin}/{path}")
+    }
+
     pub(super) fn ym(&self, path: &str, params: &[(&str, &str)]) -> Result<Value> {
         if self.yandex.is_empty() {
             bail!("Подключите Яндекс Музыку в настройках");
@@ -20,10 +27,7 @@ impl Services {
         self.ym_get(path, params)
     }
     fn ym_get(&self, path: &str, params: &[(&str, &str)]) -> Result<Value> {
-        let mut request = self
-            .http
-            .get(format!("https://api.music.yandex.net/{path}"))
-            .query(params);
+        let mut request = self.http.get(self.ym_url(path)).query(params);
         if !self.yandex.is_empty() {
             request = request.header("Authorization", format!("OAuth {}", self.yandex));
         }
@@ -37,15 +41,7 @@ impl Services {
             .context("Яндекс вернул ответ без result")
     }
     pub fn yandex_search(&self, query: &str) -> Result<Vec<Track>> {
-        let v = self.ym(
-            "search",
-            &[
-                ("text", query),
-                ("type", "track"),
-                ("page", "0"),
-                ("nocorrect", "false"),
-            ],
-        )?;
+        let v = self.yandex_search_tracks(query)?;
         Ok(v.pointer("/tracks/results")
             .and_then(Value::as_array)
             .map(|items| {
@@ -56,6 +52,17 @@ impl Services {
                     .collect()
             })
             .unwrap_or_default())
+    }
+    pub(super) fn yandex_search_tracks(&self, query: &str) -> Result<Value> {
+        self.ym(
+            "search",
+            &[
+                ("text", query),
+                ("type", "track"),
+                ("page", "0"),
+                ("nocorrect", "false"),
+            ],
+        )
     }
     pub fn yandex_search_artists(&self, query: &str) -> Result<Vec<Artist>> {
         let value = self.ym(
@@ -98,10 +105,10 @@ impl Services {
         }
         Ok(result)
     }
-    fn yandex_account(&self) -> Result<(String, String)> {
+    pub(super) fn yandex_account(&self) -> Result<(String, String)> {
         let account = self.ym("account/status", &[])?;
         let uid = id(&account["account"]["uid"]);
-        if uid.is_empty() {
+        if uid.is_empty() || !uid.bytes().all(|c| c.is_ascii_digit()) {
             bail!("Яндекс не вернул ID аккаунта");
         }
         Ok((uid, text(&account["account"], "displayName")))
@@ -171,6 +178,25 @@ impl Services {
     pub fn yandex_playlist_metadata(&self, path: &str) -> Result<Vec<Song>> {
         let value = self.ym_get(path, &[("rich-tracks", "true"), ("richTracks", "true")])?;
         self.yandex_playlist_items(value, song_metadata)
+    }
+    // Mutations are sent once. A timeout does not establish that an edit
+    // failed, so callers read the current revision before trying again.
+    pub(super) fn yandex_edit_playlist(
+        &self,
+        path: &str,
+        values: &[(&str, &str)],
+    ) -> Result<Value> {
+        let value = json(
+            self.http
+                .post(self.ym_url(path))
+                .header("Authorization", format!("OAuth {}", self.yandex))
+                .form(values)
+                .send(),
+        )?;
+        value
+            .get("result")
+            .cloned()
+            .context("Яндекс не подтвердил изменение плейлиста")
     }
     fn yandex_playlist_items<T>(
         &self,

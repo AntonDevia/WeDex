@@ -28,7 +28,7 @@ mod updates;
 use crate::{
     audio::Status,
     model::{self, Edition, Provider, Track},
-    providers::yandex::Playlist,
+    providers::{wave::Basis as WaveBasis, yandex::Playlist},
     store::{Settings, ThemePreference},
     track_import,
 };
@@ -188,6 +188,8 @@ pub(super) enum Control {
     ImportLikes,
     PickImportFile,
     CancelImport,
+    ImportBrowserHelp,
+    CopyImportBookmarklet,
     Listen(bool),
     Preset(usize),
     Preamp,
@@ -218,6 +220,7 @@ pub struct Model {
     pub updates: crate::updates::View,
     pub player_liked: Option<bool>,
     pub sonora_ready: bool,
+    pub wave_basis: Option<WaveBasis>,
     pub sonora_loading: bool,
     pub artists: Vec<model::Artist>,
     pub artist: Option<model::ArtistCatalog>,
@@ -1138,16 +1141,27 @@ impl GlassUi {
                     let width =
                         self.layout.size.x - self.layout.margin - self.layout.surface_x - 32.;
                     reason.children.clear();
-                    if m.settings.last_artist.trim().is_empty()
-                        || m.settings.last_title.trim().is_empty()
-                    {
-                        let mut headline =
-                            panels::text("Похоже на Вашу музыку", 0., 12., width, 14., false);
+                    let general_label = match m.wave_basis {
+                        Some(WaveBasis::Favorites) => Some("Моя волна · wedex-yandex"),
+                        Some(WaveBasis::Personal) => Some("Моя волна · Яндекс Музыка"),
+                        _ if m.settings.last_artist.trim().is_empty()
+                            || m.settings.last_title.trim().is_empty() =>
+                        {
+                            Some("Похоже на Вашу музыку")
+                        }
+                        _ => None,
+                    };
+                    if let Some(label) = general_label {
+                        let mut headline = panels::text(label, 0., 12., width, 14., false);
                         headline.text_align_horizontal = "CENTER".into();
                         reason.children.push(headline);
                     } else {
                         let basis = m.settings.last_title.trim();
-                        let prefix = "Подбор на основе";
+                        let prefix = if m.wave_basis == Some(WaveBasis::Track) {
+                            "Моя волна по треку"
+                        } else {
+                            "Подбор на основе"
+                        };
                         let font_size = if width < 340. { 10. } else { 13. };
                         let prefix_w = ctx.fonts(|f| {
                             f.layout_no_wrap(
@@ -1437,7 +1451,7 @@ impl GlassUi {
                         "Яндекс Музыка",
                         m.connected[0],
                         if m.account.is_empty() {
-                            "Подключён · подписка Плюс"
+                            "Подбор треков · Моя волна"
                         } else {
                             &m.account
                         },
@@ -1455,7 +1469,11 @@ impl GlassUi {
                                 if connected {
                                     status
                                 } else {
-                                    "Не подключён"
+                                    if source == "Яндекс Музыка" {
+                                        "Моя волна · не подключена"
+                                    } else {
+                                        "Не подключён"
+                                    }
                                 },
                             ]);
                         }
@@ -1840,6 +1858,9 @@ impl GlassUi {
                     self.offsets.remove("dialog-scroll");
                 }
                 self.overlay = Some(overlay);
+                if overlay == Overlay::Import {
+                    self.import_editor.help = false;
+                }
                 self.discovery = m.settings.discovery >= 0.6;
             }
             Control::Close => {
@@ -2009,10 +2030,15 @@ impl GlassUi {
             Control::PickImportFile => out.push(Intent::PickImportFile(self.import_editor.source)),
             Control::CancelImport => {
                 if matches!(m.track_import, track_import::View::Finished(_)) {
-                    self.import_editor.text.clear();
+                    self.import_editor.clear();
                 }
                 out.push(Intent::CancelImport);
             }
+            Control::ImportBrowserHelp => {
+                self.import_editor.help = !self.import_editor.help;
+                self.offsets.remove("dialog-scroll");
+            }
+            Control::CopyImportBookmarklet => self.import_editor.copy_bookmarklet = true,
             Control::Listen(shuffle) => {
                 let tracks = if self.page == Page::Playlist {
                     &m.playlist_tracks

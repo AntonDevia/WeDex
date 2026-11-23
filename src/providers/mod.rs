@@ -2,6 +2,7 @@ pub mod connections;
 mod external;
 pub mod lastfm;
 pub mod wave;
+mod wave_playlist;
 pub mod yandex;
 
 use crate::model::{match_score, Artist, Edition, Provider, Track};
@@ -18,6 +19,9 @@ pub struct Services {
     pub lastfm: String,
     pub soundcloud: String,
     pub hitmo_base: String,
+    wave_playlist: std::sync::Arc<std::sync::Mutex<wave_playlist::Cache>>,
+    #[cfg(test)]
+    yandex_test_origin: Option<String>,
 }
 
 #[cfg(test)]
@@ -517,6 +521,9 @@ impl Services {
             lastfm,
             soundcloud,
             hitmo_base: connections::DEFAULT_HITMO.into(),
+            wave_playlist: Default::default(),
+            #[cfg(test)]
+            yandex_test_origin: None,
         }
     }
     pub fn search_progress(&self, query: &str, all: bool, publish: impl Fn(SearchResult) + Sync) {

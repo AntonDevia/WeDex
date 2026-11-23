@@ -7,6 +7,9 @@ use std::sync::atomic::Ordering::Relaxed;
 pub(super) struct Editor {
     pub(super) source: Source,
     pub(super) text: String,
+    pub(super) help: bool,
+    pub(super) copy_bookmarklet: bool,
+    browser_payload: Option<String>,
 }
 
 pub(super) fn compose(glass: &mut GlassUi, model: &Model) -> Node {
@@ -15,6 +18,11 @@ pub(super) fn compose(glass: &mut GlassUi, model: &Model) -> Node {
     let (mut root, mut panel) = panels::panel(glass, "Импорт треков", 550., 466.);
     let w = panel.width - 48.;
     glass.dialog_scroll_max = 0.;
+    if glass.import_editor.help {
+        browser_help(glass, &mut panel);
+        root.children.push(panel);
+        return root;
+    }
     match &model.track_import {
         View::Finished(report) => {
             report_panel(glass, &mut panel, report);
@@ -84,16 +92,16 @@ pub(super) fn compose(glass: &mut GlassUi, model: &Model) -> Node {
             }
             let (hint, extra) = match source {
                 Source::Spotify => (
-                    "Выберите Playlist*.json или YourLibrary.json из архива Spotify. Можно также вставить список треков.",
-                    Some(("Запросить архив Spotify", Control::Open("https://www.spotify.com/account/privacy/".into()))),
+                    "Вставьте ссылку на плейлист Spotify. Если список закрыт, скопируйте треки из браузера.",
+                    Some(("Скопировать из браузера", Control::ImportBrowserHelp)),
                 ),
                 Source::Yandex => (
-                    "Вставьте ссылку на плейлист или список треков. Если Яндекс подключён, можно взять понравившиеся.",
+                    "Откройте «Мне нравится» или другой плейлист Яндекс Музыки и вставьте ссылку из меню «Поделиться».",
                     model.connected[0].then_some(("Из понравившихся Яндекса", Control::ImportLikes)),
                 ),
                 Source::Vk => (
-                    "Выберите HTML со списком аудио из архива VK или вставьте скопированный список треков.",
-                    Some(("Запросить архив VK", Control::Open("https://vk.com/data_protection?section=rules&scroll_to_archive=1".into()))),
+                    "Вставьте ссылку на профиль VK с открытыми аудио или на плейлист. Можно скопировать треки из браузера.",
+                    Some(("Скопировать из браузера", Control::ImportBrowserHelp)),
                 ),
             };
             let (message, size) = match &model.track_import {
@@ -142,6 +150,41 @@ pub(super) fn compose(glass: &mut GlassUi, model: &Model) -> Node {
     }
     root.children.push(panel);
     root
+}
+
+fn browser_help(glass: &mut GlassUi, panel: &mut Node) {
+    let mut body = panels::body(glass, panel, 226.);
+    let content = &mut body.children[0];
+    let w = content.width;
+    for (index, line) in [
+        "1. Скопируйте код. Создайте закладку WeDex в браузере и вставьте код в поле адреса закладки.",
+        "2. Откройте аудиозаписи или плейлист в браузере и нажмите закладку WeDex.",
+        "3. Нажмите «Скопировать список», вернитесь сюда и вставьте его в поле импорта.",
+    ].into_iter().enumerate() {
+        let mut label = panels::text(line, 0., 8. + index as f32 * 67., w, 14., false);
+        label.name = "Import hint".into();
+        label.height = 63.;
+        content.children.push(label);
+    }
+    panel.children.push(body);
+    let w = (panel.width - 56.) / 2.;
+    for (index, (label, control, primary)) in [
+        ("К импорту", Control::ImportBrowserHelp, false),
+        ("Копировать код", Control::CopyImportBookmarklet, true),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        panel.children.push(panels::button(
+            label,
+            24. + index as f32 * (w + 8.),
+            panel.height - 66.,
+            w,
+            44.,
+            control,
+            primary,
+        ));
+    }
 }
 
 fn report_panel(glass: &mut GlassUi, panel: &mut Node, report: &Report) {
@@ -232,12 +275,16 @@ fn report_panel(glass: &mut GlassUi, panel: &mut Node, report: &Report) {
 }
 
 pub(super) fn input(glass: &mut GlassUi, ui: &mut egui::Ui) {
+    if std::mem::take(&mut glass.import_editor.copy_bookmarklet) {
+        ui.ctx()
+            .copy_text(crate::track_import::browser_bookmarklet());
+    }
     let Some((bounds, clip)) = glass.renderer.regions.get("Import text").copied() else {
         return;
     };
     let rect = bounds.intersect(clip).shrink(8.);
     let heading = egui::Rect::from_min_size(rect.min, egui::vec2(rect.width(), 36.));
-    let (heading, _) =
+    let (heading, pasted) =
         crate::platform::paste_button(ui, heading, &mut glass.import_editor.text, glass.dark);
     let rect = egui::Rect::from_min_max(rect.min, egui::pos2(heading.right(), rect.bottom()));
     let id = egui::Id::new("track-import-text");
@@ -247,8 +294,28 @@ pub(super) fn input(glass: &mut GlassUi, ui: &mut egui::Ui) {
         Color32::from_rgb(28, 26, 30)
     };
     let context = ui.ctx().clone();
-    crate::platform::text_before(&context, id, &mut glass.import_editor.text);
-    ui.scope(|ui| {
+    if let Some(payload) = context.input_mut(|input| {
+        let position = input.events.iter().position(
+            |event| matches!(event, egui::Event::Paste(value) if Editor::is_browser_export(value)),
+        )?;
+        if let egui::Event::Paste(payload) = input.events.remove(position) {
+            Some(payload)
+        } else {
+            None
+        }
+    }) {
+        glass.import_editor.receive_browser_payload(payload);
+    } else if pasted {
+        glass.import_editor.browser_payload = None;
+        if Editor::is_browser_export(&glass.import_editor.text) {
+            let payload = std::mem::take(&mut glass.import_editor.text);
+            glass.import_editor.receive_browser_payload(payload);
+        }
+    }
+    if crate::platform::text_before(&context, id, &mut glass.import_editor.text) {
+        glass.import_editor.browser_payload = None;
+    }
+    let response = ui.scope(|ui| {
         ui.set_clip_rect(ui.clip_rect().intersect(rect));
         ui.put(
             rect,
@@ -257,19 +324,36 @@ pub(super) fn input(glass: &mut GlassUi, ui: &mut egui::Ui) {
                 .frame(false)
                 .char_limit(131_072)
                 .hint_text(
-                    RichText::new("Исполнитель — название\nОдин трек на строку")
+                    RichText::new("Вставьте ссылку или список\nИсполнитель — название")
                         .color(color.gamma_multiply(0.65)),
                 )
                 .text_color(color)
                 .desired_width(rect.width())
                 .desired_rows(3),
-        );
+        )
     });
+    if response.inner.changed() {
+        glass.import_editor.browser_payload = None;
+    }
     crate::platform::text_after(&context, id, &glass.import_editor.text, false, false);
 }
 
 impl Editor {
     pub(super) fn input(&self) -> Input {
-        Input::Text(self.source, self.text.clone())
+        Input::Text(
+            self.source,
+            self.browser_payload.as_ref().unwrap_or(&self.text).clone(),
+        )
+    }
+    pub(super) fn clear(&mut self) {
+        self.text.clear();
+        self.browser_payload = None;
+    }
+    fn is_browser_export(value: &str) -> bool {
+        value.starts_with("{\"wedexTracks\":")
+    }
+    fn receive_browser_payload(&mut self, payload: String) {
+        self.text = "Список треков из браузера".into();
+        self.browser_payload = Some(payload);
     }
 }

@@ -315,8 +315,6 @@ impl App {
         }
         if let Some(page) = preview {
             app.install_preview(&page);
-        } else if !app.services.yandex.is_empty() {
-            app.load_playlists();
         }
         app
     }
@@ -462,6 +460,10 @@ impl App {
                             self.loading_playlist = false;
                             self.account.clear();
                             self.track_import.cancel();
+                            self.wave_feedback.finish();
+                            self.wave = None;
+                            self.radio_id = self.radio_id.wrapping_add(1);
+                            self.generating = false;
                         }
                         self.yandex_token = value.clone();
                         self.services.yandex = value.clone();
@@ -485,9 +487,6 @@ impl App {
                     self.interface.connection_saved(provider, &value);
                 } else {
                     self.interface.connection_updated(provider, &value);
-                }
-                if provider == Provider::Yandex && !value.is_empty() {
-                    self.load_playlists();
                 }
             }
             Err(error) => {
@@ -533,9 +532,20 @@ impl App {
         let seed = (!self.settings.last_title.is_empty())
             .then(|| seeds.first().cloned())
             .flatten();
+        let favorites = if !self.services.yandex.is_empty() && session.is_none() && seed.is_none() {
+            self.favorites.clone()
+        } else {
+            Vec::new()
+        };
         self.job(move |s| {
             if !s.yandex.is_empty() {
-                match s.wave(session, seed.as_ref(), discovery, &wave_excluded) {
+                match s.wave(
+                    session,
+                    seed.as_ref(),
+                    &favorites,
+                    discovery,
+                    &wave_excluded,
+                ) {
                     Ok(batch) => return Event::Wave(id, batch, autoplay),
                     Err(e) => {
                         let _ = crate::diagnostics::append(
@@ -578,9 +588,7 @@ impl App {
                 .seeds(&self.favorites, &self.settings.recent_radio_seeds);
         }
         if seeds.is_empty() && self.services.yandex.is_empty() {
-            self.message =
-                "Введите исполнителя и трек для старта или импортируйте понравившиеся из Яндекса"
-                    .into();
+            self.message = "Добавьте треки в понравившиеся через Медиатеку → Импорт".into();
             return;
         }
         self.sonora_ready = false;
@@ -1402,6 +1410,10 @@ impl App {
             player_liked: None,
             updates: self.updates.view.clone(),
             sonora_ready: self.sonora_ready,
+            wave_basis: self
+                .wave
+                .as_ref()
+                .map(crate::providers::wave::Session::basis),
             sonora_loading: self.generating,
             error_generation: self.error_generation,
             settings: self.settings.clone(),
@@ -1451,6 +1463,7 @@ impl App {
             preview: self.preview_status.is_some(),
         };
         if let Some(p) = self.controlled_playback() {
+            model.wave_basis = None;
             model.status = self.display_status();
             model.sonora_ready = p.track.is_some();
             model.sonora_loading = p.loading
@@ -1954,6 +1967,12 @@ impl App {
                     Page::Search | Page::Artist => Tab::Search,
                     _ => Tab::Library,
                 };
+                if page == Page::Playlists
+                    && self.preview_status.is_none()
+                    && !self.services.yandex.is_empty()
+                {
+                    self.load_playlists();
+                }
             }
             Intent::Search(query) => {
                 self.query = query;

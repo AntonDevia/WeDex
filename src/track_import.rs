@@ -14,6 +14,18 @@ use std::{
 
 #[cfg(any(windows, target_os = "android"))]
 pub mod file;
+mod links;
+
+pub fn browser_bookmarklet() -> String {
+    format!(
+        "javascript:{}",
+        include_str!("track_import/browser.js")
+            .lines()
+            .map(str::trim)
+            .collect::<Vec<_>>()
+            .join(" ")
+    )
+}
 
 pub const FILE_LIMIT: usize = 8 * 1024 * 1024;
 const TRACK_LIMIT: usize = 10_000;
@@ -155,6 +167,19 @@ fn vk_html(contents: &str) -> Vec<Song> {
     let mut songs: Vec<_> = html
         .select(&rows)
         .filter_map(|row| {
+            if let Some(track) = row
+                .attr("data-audio")
+                .and_then(|data| serde_json::from_str::<Value>(data).ok())
+            {
+                if let Some(song) = Song::new(
+                    track[3].as_str().unwrap_or_default(),
+                    track[4].as_str().unwrap_or_default(),
+                ) {
+                    if !song.artist.is_empty() {
+                        return Some(song);
+                    }
+                }
+            }
             let title = row.select(&titles).next()?.text().collect::<String>();
             let artist = row
                 .select(&artists)
@@ -244,6 +269,11 @@ fn parse(source: Source, contents: &str) -> Result<Vec<Song>> {
     }
     if contents.starts_with(['{', '[']) {
         let value: Value = serde_json::from_str(contents).context("Не удалось прочитать JSON")?;
+        if value["wedexTracks"].is_array() {
+            return Ok(array(&value["wedexTracks"])
+                .filter_map(|track| Song::new(field(track, &["title"]), field(track, &["artist"])))
+                .collect());
+        }
         return Ok(match source {
             Source::Spotify => spotify(&value),
             Source::Vk => vk_json(&value),
@@ -294,10 +324,13 @@ fn yandex_url(contents: &str) -> Result<String> {
     );
     let parts: Vec<_> = url.path().trim_end_matches('/').split('/').collect();
     match parts.as_slice() {
-        ["", "playlists", key] => {
+        ["", "playlists", key] | ["", "users", _, "playlists", key]
+            if !key.bytes().all(|c| c.is_ascii_digit()) =>
+        {
             let id = key
                 .strip_prefix("lk.")
                 .or_else(|| key.strip_prefix("ch."))
+                .or_else(|| key.strip_prefix("pl."))
                 .unwrap_or(key);
             if uuid::Uuid::try_parse(id).is_ok() {
                 return Ok(format!("playlist/{key}"));
@@ -356,10 +389,15 @@ pub fn run(
     progress: &Progress,
 ) -> Result<(Vec<Track>, Report)> {
     let mut songs = match input {
-        Input::Text(Source::Yandex, text) if text.trim().starts_with("https://") => {
-            anyhow::ensure!(!offline, "Для чтения плейлиста нужен интернет");
-            let path = yandex_url(text.trim())?;
-            services.yandex_playlist_metadata(&path)?
+        Input::Text(source, text) if text.trim().starts_with("https://") => {
+            anyhow::ensure!(!offline, "Для чтения ссылки нужен интернет");
+            let link = text.trim();
+            if source == Source::Yandex {
+                let path = yandex_url(link)?;
+                services.yandex_playlist_metadata(&path)?
+            } else {
+                links::load(source, link)?
+            }
         }
         Input::Text(source, text) => parse(source, &text)?,
         Input::YandexLikes => {

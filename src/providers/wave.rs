@@ -6,8 +6,26 @@ use std::collections::HashMap;
 #[derive(Clone, Debug, Default)]
 pub struct Session {
     pub id: String,
+    pub station: String,
     pub batches: HashMap<String, String>,
     pub received: Vec<String>,
+}
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Basis {
+    Favorites,
+    Personal,
+    Track,
+}
+impl Session {
+    pub fn basis(&self) -> Basis {
+        if self.station.starts_with("playlist:") {
+            Basis::Favorites
+        } else if self.station.starts_with("track:") {
+            Basis::Track
+        } else {
+            Basis::Personal
+        }
+    }
 }
 pub struct Batch {
     pub session: Session,
@@ -19,7 +37,7 @@ impl Services {
         anyhow::ensure!(!self.yandex.is_empty(), "Яндекс не подключён");
         let value = request_json(
             self.http
-                .post(format!("https://api.music.yandex.net/rotor/{path}"))
+                .post(self.ym_url(&format!("rotor/{path}")))
                 .header("Authorization", format!("OAuth {}", self.yandex))
                 .json(&body),
         )?;
@@ -35,10 +53,12 @@ impl Services {
         &self,
         session: Option<Session>,
         seed: Option<&Track>,
+        favorites: &[Track],
         discovery: f32,
         excluded: &[String],
     ) -> Result<Batch> {
-        if let Some(s) = session {
+        let station = if let Some(s) = session {
+            let station = s.station.clone();
             if let Ok(value) = self.wave_post(
                 &format!("session/{}/tracks", url_id(&s.id)?),
                 json!({"queue":s.received}),
@@ -49,9 +69,8 @@ impl Services {
                     }
                 }
             }
-        }
-        let mut seeds = vec!["user:onyourwave".to_owned()];
-        if let Some(t) = seed {
+            station
+        } else if let Some(t) = seed {
             let catalog = if t.provider == Provider::Yandex {
                 Some(t.clone())
             } else {
@@ -59,23 +78,52 @@ impl Services {
                     .into_iter()
                     .find(|candidate| match_score(t, candidate) >= 0.94)
             };
-            if let Some(t) = catalog {
-                seeds = vec![format!("track:{}", t.id)];
+            catalog.map_or_else(
+                || "user:onyourwave".to_owned(),
+                |t| format!("track:{}", t.id),
+            )
+        } else {
+            match self.sync_wave_playlist(favorites) {
+                Ok(Some(station)) => station,
+                Ok(None) => "user:onyourwave".into(),
+                Err(error) => {
+                    self.note_playlist_wave_error(&error);
+                    "user:onyourwave".into()
+                }
             }
+        };
+        let start = |station: String| {
+            let mut seeds = vec![station.clone()];
+            if discovery >= 0.6 {
+                seeds.push("settingDiversity:discover".into());
+            }
+            let value = self.wave_post("session/new", json!({"seeds":seeds,"queue":excluded,
+                "includeTracksInResponse":true,"includeWaveModel":true,"interactive":true,"allowExplicit":true}))?;
+            parse(
+                value,
+                Session {
+                    station,
+                    received: excluded.to_vec(),
+                    ..Default::default()
+                },
+            )
+        };
+        let playlist = station.starts_with("playlist:");
+        match start(station) {
+            Err(error) if playlist => {
+                self.note_playlist_wave_error(&error);
+                start("user:onyourwave".into())
+            }
+            result => result,
         }
-        // Diversity seeds are understood by the session API and apply to this session only.
-        if discovery >= 0.6 {
-            seeds.push("settingDiversity:discover".into());
-        }
-        let value = self.wave_post("session/new", json!({"seeds":seeds,"queue":excluded,
-            "includeTracksInResponse":true,"includeWaveModel":true,"interactive":true,"allowExplicit":true}))?;
-        parse(
-            value,
-            Session {
-                received: excluded.to_vec(),
-                ..Default::default()
-            },
-        )
+    }
+    fn note_playlist_wave_error(&self, error: &anyhow::Error) {
+        let _ = crate::diagnostics::append(
+            &crate::diagnostics::log_path(),
+            "wave-playlist",
+            &error.to_string(),
+            &[&self.yandex],
+        );
     }
     pub fn wave_feedback(
         &self,
@@ -158,10 +206,10 @@ mod tests {
     #[ignore = "Starts a real personal Wave session using the configured account, without playback feedback"]
     fn live_personal_wave() {
         let services = Services::new(crate::store::secret("yandex"), String::new(), String::new());
-        let batch = services.wave(None, None, 0., &[]).unwrap();
+        let batch = services.wave(None, None, &[], 0., &[]).unwrap();
         assert!(!batch.tracks.is_empty());
         let second = services
-            .wave(Some(batch.session.clone()), None, 0., &[])
+            .wave(Some(batch.session.clone()), None, &[], 0., &[])
             .unwrap();
         assert!(second
             .tracks

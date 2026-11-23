@@ -762,6 +762,7 @@ fn fixture() -> Model {
         player_liked: None,
         updates: Default::default(),
         sonora_ready: true,
+        wave_basis: None,
         sonora_loading: false,
         artists: Vec::new(),
         artist: None,
