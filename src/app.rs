@@ -588,7 +588,7 @@ impl App {
                 .seeds(&self.favorites, &self.settings.recent_radio_seeds);
         }
         if seeds.is_empty() && self.services.yandex.is_empty() {
-            self.message = "Добавьте треки в понравившиеся через Медиатеку → Импорт".into();
+            self.message = "Добавьте треки через Настройки → Импорт треков".into();
             return;
         }
         self.sonora_ready = false;
@@ -1659,7 +1659,7 @@ impl App {
                 9 => self.glass_action(Intent::Recognize),
                 10 => {
                     if self.interface.overlay.is_some() {
-                        self.interface.overlay = None;
+                        self.interface.close_overlay();
                     } else if self.interface.zen {
                         self.interface.zen = false;
                         self.zen_request = Some(false);

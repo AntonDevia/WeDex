@@ -282,7 +282,7 @@ impl Layout {
                 }
                 "Library filters" => {
                     let gap = 4.;
-                    let width = ((self.main_width - 2. * gap) / 3.).min(168.);
+                    let width = ((self.main_width - gap) / 2.).min(168.);
                     for (i, tab) in n.children.iter_mut().enumerate() {
                         tab.move_to(i as f32 * (width + gap), 0.);
                         tab.width = width;

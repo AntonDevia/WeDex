@@ -368,13 +368,23 @@ pub(super) fn settings(ui: &mut GlassUi, m: &Model) -> Node {
         }
         b.children.push(mark);
     }
+    let button_width = (w - 8.) / 2.;
     b.children.push(button(
         "Подключения",
         0.,
         104.,
-        w,
+        button_width,
         40.,
         Control::Overlay(Overlay::Sources),
+        false,
+    ));
+    b.children.push(button(
+        "Импорт треков",
+        button_width + 8.,
+        104.,
+        button_width,
+        40.,
+        Control::Overlay(Overlay::Import),
         false,
     ));
     section(b, "Оформление", 172.);

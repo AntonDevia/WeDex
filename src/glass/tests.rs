@@ -436,7 +436,7 @@ fn media_library_opens_favorites_first_and_keeps_playlists_accessible() {
             .iter()
             .map(|n| n.name.as_str())
             .collect::<Vec<_>>(),
-        ["tab/Понравившиеся", "tab/Плейлисты", "Импорт"]
+        ["tab/Понравившиеся", "tab/Плейлисты"]
     );
     assert!(root.find("button/Слушать всё").is_none());
     assert!(root.find("button/Перемешать").is_none());
@@ -450,6 +450,16 @@ fn media_library_opens_favorites_first_and_keeps_playlists_accessible() {
         .find("Ваши коллекции синхронизируются из Яндекс Музыки.")
         .is_none());
     assert!(root.find("Playlist grid").is_some());
+    assert!(!h
+        .ui
+        .renderer
+        .hits
+        .iter()
+        .any(|hit| matches!(hit.control, Control::Overlay(Overlay::Import))));
+    let settings = h.point(|c| matches!(c, Control::Overlay(Overlay::Settings)), 0.5);
+    h.click(&m, settings);
+    h.frame(&m, vec![]);
+    assert_eq!(h.ui.overlay, Some(Overlay::Settings));
     let import = h.point(|c| matches!(c, Control::Overlay(Overlay::Import)), 0.5);
     h.click(&m, import);
     h.frame(&m, vec![]);
@@ -464,6 +474,10 @@ fn media_library_opens_favorites_first_and_keeps_playlists_accessible() {
     assert!(h.click(&m, start).iter().any(|intent| {
         matches!(intent, Intent::Import(crate::track_import::Input::Text(crate::track_import::Source::Vk, text)) if text == "Исполнитель — Трек")
     }));
+    h.frame(&m, vec![]);
+    let close = h.point(|c| matches!(c, Control::Close), 0.5);
+    h.click(&m, close);
+    assert_eq!(h.ui.overlay, Some(Overlay::Settings));
 }
 
 #[test]

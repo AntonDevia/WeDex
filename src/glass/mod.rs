@@ -1216,15 +1216,6 @@ impl GlassUi {
                     {
                         n.command = Some(Control::Navigate(page));
                     }
-                    tabs.children.push(panels::button(
-                        "Импорт",
-                        0.,
-                        0.,
-                        120.,
-                        40.,
-                        Control::Overlay(Overlay::Import),
-                        false,
-                    ));
                 }
                 if self.page == Page::Favorites {
                     root.children.retain(|n| {
@@ -1765,6 +1756,13 @@ impl GlassUi {
         screen.children.push(list);
         screen
     }
+    pub(crate) fn close_overlay(&mut self) {
+        self.overlay = match self.overlay {
+            Some(Overlay::Import) => Some(Overlay::Settings),
+            _ => None,
+        };
+    }
+
     fn process(
         &mut self,
         control: Control,
@@ -1868,7 +1866,7 @@ impl GlassUi {
                 if self.overlay == Some(Overlay::Recognition) {
                     out.push(Intent::CancelRecognition);
                 }
-                self.overlay = None;
+                self.close_overlay();
             }
             Control::PlayPause => {
                 if let Some(index) = m
