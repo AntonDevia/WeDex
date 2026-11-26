@@ -7,34 +7,34 @@
     "https://ru.hitmoxx.com/",
     "https://ru.hitmox.org/"
   ],
-  "checked_at_ms": 1795661662935,
+  "checked_at_ms": 1795697390725,
   "discovery": "globalping_redirect_with_ru_validation",
-  "source_measurement": "2vmYNk35DUR7n89uB00021ZYk",
+  "source_measurement": "23949pztfVpmcMLky00021ZiL",
   "discovered_origin": "https://ru.hitmoxx.com/",
-  "discovered_at_ms": 1795661659774,
+  "discovered_at_ms": 1795697388044,
   "ru_checks": [
     {
       "origin": "https://ru.hitmox.net/",
-      "measurement": "26bdinGJMc5vZxWur00021ZYk",
+      "measurement": "2WAwLsfTaQThOqJcA00021ZiL",
       "probes": [
-        {
-          "country": "RU",
-          "network": "MTS",
-          "asn": 8359,
-          "http_status": 200,
-          "ok": true
-        },
-        {
-          "country": "RU",
-          "network": "OJSC National Cable Networks",
-          "asn": 42610,
-          "http_status": 200,
-          "ok": true
-        },
         {
           "country": "RU",
           "network": "Limited Company Information and Consulting Agency",
           "asn": 31357,
+          "http_status": 200,
+          "ok": true
+        },
+        {
+          "country": "RU",
+          "network": "Datacheap",
+          "asn": 16262,
+          "http_status": 200,
+          "ok": true
+        },
+        {
+          "country": "RU",
+          "network": "MTS",
+          "asn": 8359,
           "http_status": 200,
           "ok": true
         }
