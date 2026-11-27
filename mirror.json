@@ -7,15 +7,15 @@
     "https://ru.hitmoxx.com/",
     "https://ru.hitmox.org/"
   ],
-  "checked_at_ms": 1795731904998,
+  "checked_at_ms": 1795756078734,
   "discovery": "globalping_redirect_with_ru_validation",
-  "source_measurement": "2INERM5cqfY3UWrlJ00021Zrc",
+  "source_measurement": "2YgHFAwDOFvCCuNdi00021Zy7",
   "discovered_origin": "https://ru.hitmoxx.com/",
-  "discovered_at_ms": 1795731901954,
+  "discovered_at_ms": 1795756076123,
   "ru_checks": [
     {
       "origin": "https://ru.hitmox.net/",
-      "measurement": "2tAmChHAiWKKrOzAW00021Zrd",
+      "measurement": "2MguNQGRuwqnxFjNj00021Zy7",
       "probes": [
         {
           "country": "RU",
@@ -26,15 +26,15 @@
         },
         {
           "country": "RU",
-          "network": "Datacheap",
-          "asn": 16262,
+          "network": "MTS",
+          "asn": 8359,
           "http_status": 200,
           "ok": true
         },
         {
           "country": "RU",
-          "network": "MTS",
-          "asn": 8359,
+          "network": "SERV.HOST GROUP",
+          "asn": 207957,
           "http_status": 200,
           "ok": true
         }
