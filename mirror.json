@@ -7,20 +7,20 @@
     "https://ru.hitmoxx.com/",
     "https://ru.hitmox.org/"
   ],
-  "checked_at_ms": 1795822443359,
+  "checked_at_ms": 1795852816518,
   "discovery": "globalping_redirect_with_ru_validation",
-  "source_measurement": "29hqPSIWjQeFKR6q700021aFx",
+  "source_measurement": "2BUk7qheX25z1ZJmZ00021aO8",
   "discovered_origin": "https://ru.hitmoxx.com/",
-  "discovered_at_ms": 1795822435263,
+  "discovered_at_ms": 1795852813456,
   "ru_checks": [
     {
       "origin": "https://ru.hitmox.net/",
-      "measurement": "2D6b4KzMBIAiIVBaZ00021aFx",
+      "measurement": "2o3Lcenczak9obI3k00021aO8",
       "probes": [
         {
           "country": "RU",
-          "network": "Datacheap",
-          "asn": 16262,
+          "network": "OJSC National Cable Networks",
+          "asn": 42610,
           "http_status": 200,
           "ok": true
         },
