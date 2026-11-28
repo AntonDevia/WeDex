@@ -7,27 +7,27 @@
     "https://ru.hitmoxx.com/",
     "https://ru.hitmox.org/"
   ],
-  "checked_at_ms": 1795852816518,
+  "checked_at_ms": 1795885063748,
   "discovery": "globalping_redirect_with_ru_validation",
-  "source_measurement": "2BUk7qheX25z1ZJmZ00021aO8",
+  "source_measurement": "2XS5NoR34Uv7r4hSU00021aWn",
   "discovered_origin": "https://ru.hitmoxx.com/",
-  "discovered_at_ms": 1795852813456,
+  "discovered_at_ms": 1795885060722,
   "ru_checks": [
     {
       "origin": "https://ru.hitmox.net/",
-      "measurement": "2o3Lcenczak9obI3k00021aO8",
+      "measurement": "2TZCrnZsckBXk8mGm00021aWn",
       "probes": [
         {
           "country": "RU",
-          "network": "OJSC National Cable Networks",
-          "asn": 42610,
+          "network": "Limited Company Information and Consulting Agency",
+          "asn": 31357,
           "http_status": 200,
           "ok": true
         },
         {
           "country": "RU",
-          "network": "Limited Company Information and Consulting Agency",
-          "asn": 31357,
+          "network": "SERV.HOST GROUP",
+          "asn": 207957,
           "http_status": 200,
           "ok": true
         },
